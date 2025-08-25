@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>地方→都道府県→市 + タップで円 / Shift+ドラッグで四角（OSM・API不要）</title>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+
+<style>
+  :root{ --maxw:1100px; --gap:14px; --radius:14px; --border:#e5e7eb; --muted:#64748b; --accent:#6366f1; --green:#10b981 }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent }
+  html,body{ height:100% } body{ margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif; color:#0f172a; background:#f7f8fc }
+
+  header,main,footer{ width:min(100%,var(--maxw)); margin:0 auto; padding:16px }
+  header{ display:flex; align-items:center; justify-content:space-between; gap:12px }
+  header h1{ margin:0; font-size:clamp(18px,2vw+12px,28px) }
+  .btn-login{ padding:10px 14px; border-radius:999px; background:#111827; color:#fff; text-decoration:none; font-weight:600 }
+
+  .layout{ display:grid; gap:var(--gap); grid-template-columns:1fr } 
+  @media(min-width:900px){ .layout{ grid-template-columns:360px 1fr } }
+
+  .panel{ border:1px solid var(--border); border-radius:var(--radius); background:#fff; overflow:clip; box-shadow:0 10px 24px #00000010 }
+  .panel h2{ margin:0; padding:12px 14px; font-size:18px; border-bottom:1px solid var(--border); background:#fafafa; position:sticky; top:0; z-index:1 }
+
+  /* 中央揃え：左が入力・右がボタン */
+  .search-wrap{ display:flex; justify-content:center }
+  .search-bar{ display:grid; grid-template-columns:1fr auto; gap:8px; width:min(720px,92vw) }
+  .search-bar input{ padding:14px 16px; font-size:16px; border:1px solid var(--border); border-radius:14px }
+  .search-bar button{ padding:14px 16px; font-size:16px; border-radius:14px; border:1px solid transparent; background:#6366f1; color:#fff; cursor:pointer }
+
+  .filters{ display:flex; gap:10px; align-items:center; margin-top:8px; color:#334155; font-size:15px; flex-wrap:wrap; justify-content:center }
+  .chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; justify-content:center }
+  .chip{ padding:6px 10px; border:1px solid var(--border); border-radius:999px; font-size:14px; background:#fff; cursor:pointer }
+  .muted{ color:#64748b }
+
+  .list{ padding:10px; display:grid; gap:10px; max-height:70vh; overflow:auto }
+  .item{ border:1px solid var(--border); border-radius:14px; padding:12px; background:#fff }
+  .item.selected{ border-color:var(--accent); box-shadow:0 0 0 4px #6366f133 }
+  .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center }
+  .tag{ font-size:12px; color:#475569; background:#f1f5f9; padding:4px 10px; border-radius:999px }
+  .btn{ display:inline-flex; align-items:center; gap:8px; padding:10px 12px; min-height:40px; border-radius:12px; border:1px solid var(--border); background:#fff; text-decoration:none; color:#0f172a; cursor:pointer; font-size:14px }
+  .btn-discount{ background:#10b981; color:#fff; border-color:#10b981; font-weight:600 }
+
+  #map{ width:100%; height:60vh; min-height:52vh; border:1px solid var(--border); border-radius:var(--radius) }
+  .mapbar{ display:flex; gap:8px; align-items:center; padding:10px 12px; border-top:1px solid var(--border); background:#fafafa; flex-wrap:wrap }
+  .radiusWrap{ display:flex; gap:8px; align-items:center }
+  input[type="range"]{ touch-action:none }
+  .pills{ display:flex; gap:6px; flex-wrap:wrap }
+  .pill{ padding:6px 10px; border:1px solid var(--border); border-radius:999px; font-size:13px; background:#fff; cursor:pointer }
+  .pill.active{ border-color:#0ea5e9; box-shadow:0 0 0 3px #0ea5e922 }
+
+  /* 地理カスケード */
+  .geo-cascade{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:10px }
+  .geo-cascade select{
+    appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    padding:12px 14px; border:1px solid var(--border); border-radius:12px; background:#fff url("data:image/svg+xml,%3Csvg width='14' height='10' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l6 6 6-6' stroke='%2364768b' stroke-width='2' fill='none'/%3E%3C/svg%3E") no-repeat right 10px center/14px 10px;
+    min-width: 200px; font-size:14px; color:#0f172a;
+  }
+
+  .toast{ position:fixed; left:50%; transform:translateX(-50%); bottom:16px; background:#111827; color:#fff; padding:10px 14px; border-radius:12px; font-size:14px; opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:9999 }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(-4px) }
+
+  /* 下からスライドの詳細パネル */
+  .panel-detail{ position:fixed; left:0; right:0; bottom:0; height:min(70vh,520px); background:#1f2937; color:#fff; border-radius:16px 16px 0 0; box-shadow:0 -10px 30px #0005; transform:translateY(100%); transition:transform .28s ease; z-index:10000; display:grid; grid-template-rows:auto 1fr auto; gap:12px; padding:16px }
+  .panel-detail.is-active{ transform:translateY(0) }
+  .panel-detail h3{ margin:0 }
+  .panel-detail .content{ overflow:auto }
+  .panel-detail .actions{ display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end }
+  .closeBtn{ background:#111827; color:#fff; border:1px solid #374151; border-radius:10px; padding:8px 12px; cursor:pointer }
+
+  /* コメント欄 */
+  .comments{ padding:12px; display:grid; gap:10px }
+  .comment-form{ display:grid; gap:8px }
+  .comment-form input,.comment-form textarea{ padding:10px 12px; border:1px solid var(--border); border-radius:10px; font-size:14px }
+  .comment{ border:1px solid var(--border); border-radius:12px; padding:10px 12px; background:#fff }
+  .comment small{ color:var(--muted) }
+</style>
+</head>
+<body>
+<header>
+  <h1>地方⇒都道府県⇒市（OSM）</h1>
+  <a class="btn-login" href="https://lagrangero-group4.web.app/?v=2" target="_blank" rel="noopener">ログイン</a>
+</header>
+
+<main>
+  <section>
+    <div class="search-wrap">
+      <form id="searchForm" class="search-bar" novalidate>
+        <input id="q" type="search" inputmode="search" placeholder="キーワード（未入力でもOK：下の地域/範囲で絞込）">
+        <button>検索</button>
+      </form>
+    </div>
+
+    <!-- 地方→都道府県→市 -->
+    <div class="geo-cascade">
+      <select id="regionSelect" aria-label="地方">
+        <option value="">地方（未選択）</option>
+        <option value="関東">関東</option>
+      </select>
+      <select id="prefSelect" aria-label="都道府県" disabled>
+        <option value="">都道府県（まず地方を選択）</option>
+      </select>
+      <select id="citySelect" aria-label="市区町村" disabled>
+        <option value="">市区町村（まず都道府県を選択）</option>
+      </select>
+      <button id="clearGeo" class="btn" type="button">× 地域クリア</button>
+    </div>
+
+    <!-- フィルタ -->
+    <div class="filters">
+      <label><input type="checkbox" id="onlyDiscount"> 学割ありのみ</label>
+      <label><input type="checkbox" id="boundsOnly"> 表示範囲だけ</label>
+      <label><input type="checkbox" id="sortByDistance"> 距離順（現在地）</label>
+      <button id="locateBtn" class="btn" type="button">◎ 現在地</button>
+      <button id="resetBtn" class="btn" type="button">↺ リセット</button>
+      <small id="geoStatus" class="muted"></small>
+    </div>
+
+    <div class="chips" id="chips">
+      <button class="chip" data-city="横浜市" data-query="中華街"># 中華街</button>
+      <button class="chip" data-city="横浜市" data-query="みなとみらい"># みなとみらい</button>
+      <button class="chip" data-city="横浜市" data-query="山下公園"># 山下公園</button>
+      <button class="chip" data-city="横浜市" data-query="赤レンガ"># 赤レンガ倉庫</button>
+      <button class="chip" data-city="横浜市" data-query="三溪園"># 三溪園</button>
+    </div>
+  </section>
+
+  <section class="layout" style="margin-top:14px">
+    <div class="panel">
+      <h2>検索結果 <span id="resultCount" class="muted"></span></h2>
+      <div class="list" id="list"></div>
+    </div>
+
+    <div class="panel">
+      <h2 style="margin:0; padding:12px 14px;">地図（タップ＝円 / Shift+ドラッグ＝四角）</h2>
+      <div id="map" aria-label="地図"></div>
+
+      <div class="mapbar">
+        <div class="radiusWrap">
+          <span class="muted">半径</span>
+          <input id="radius" type="range" min="100" max="3000" step="50" value="600">
+          <span id="radiusVal" class="muted">600m</span>
+        </div>
+        <div class="pills" aria-label="半径プリセット">
+          <button class="pill" data-r="300">300m</button>
+          <button class="pill active" data-r="600">600m</button>
+          <button class="pill" data-r="1000">1km</button>
+          <button class="pill" data-r="2000">2km</button>
+        </div>
+        <button id="centerHere" class="btn" type="button">⊙ 中心＝現在地</button>
+        <span id="stat" class="muted">選択範囲：なし（地図をタップ / Shift+ドラッグ）</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- コメント欄 -->
+  <section class="panel" style="margin-top:14px">
+    <h2>コメント</h2>
+    <div class="comments">
+      <form id="commentForm" class="comment-form">
+        <input id="cName" type="text" placeholder="お名前（任意）">
+        <textarea id="cText" rows="3" placeholder="コメントを書く…"></textarea>
+        <button class="btn" type="submit">投稿</button>
+      </form>
+      <div id="commentList"></div>
+    </div>
+  </section>
+</main>
+
+<footer>© 2025 Demo · タイル: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></footer>
+
+<!-- スライド詳細パネル -->
+<div id="slidePanel" class="panel-detail" aria-live="polite">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+    <h3 id="panelTitle">詳細</h3>
+    <button id="closePanel" class="closeBtn" type="button">閉じる</button>
+  </div>
+  <div id="panelContent" class="content"></div>
+  <div class="actions">
+    <a id="panelLink" class="btn" target="_blank" rel="noopener" href="#">関連リンクを開く</a>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+<script>
+/* ===== データ ===== */
+const PLACES = [
+  { id:'chinatown',   name:'横浜中華街', lat:35.4437, lon:139.6380, tags:['中華街','グルメ','観光'], desc:'約600店が集まる日本最大級のチャイナタウン。', student:{ available:false, url:'https://www.chinatown.or.jp/' } },
+  { id:'akarenga',    name:'横浜赤レンガ倉庫', lat:35.4513, lon:139.6400, tags:['赤レンガ','イベント'], desc:'歴史的建造物を活用した商業＆イベント施設。通常入場無料（イベント別途）。', student:{ available:false, url:'https://www.yokohama-akarenga.jp/' } },
+  { id:'minatomirai', name:'みなとみらい21', lat:35.4540, lon:139.6326, tags:['みなとみらい','展望'], desc:'観光名所が点在するウォーターフロント地区。', student:{ available:false } },
+  { id:'yamashita',   name:'山下公園', lat:35.4433, lon:139.6507, tags:['公園','散策'], desc:'港に面した海辺の都市公園（入園無料）。', student:{ available:false, url:'https://www.yokohamajapan.com/things-to-do/detail.php?bbid=190' } },
+  { id:'cupnoodles',  name:'カップヌードルミュージアム 横浜', lat:35.4564, lon:139.6389, tags:['みなとみらい','博物館','体験'], desc:'インスタントラーメンの歴史と体験が楽しめるミュージアム。', student:{ available:true, price:{ student:0, adult:500 }, condition:'高校生以下は入館無料／大人（大学生以上）500円。体験は別料金。', url:'https://www.cupnoodles-museum.jp/en/yokohama/guide/admission/' } },
+  { id:'sankeien',    name:'三溪園', lat:35.4160, lon:139.6530, tags:['三溪園','庭園','文化'], desc:'歴史的建造物と四季の景観が美しい日本庭園。', student:{ available:true, price:{ student:200, adult:900 }, condition:'小・中学生200円／高校生以上900円', url:'https://www.sankeien.or.jp/price-service/' } },
+  { id:'osanbashi',   name:'大さん橋', lat:35.4519, lon:139.6523, tags:['海','建築','散策'], desc:'屋上広場は24時間開放のビュースポット（無料）。', student:{ available:false, url:'https://osanbashi.jp/en/rooftop/' } },
+  { id:'marinetower', name:'横浜マリンタワー', lat:35.4437, lon:139.6526, tags:['展望','山下公園'], desc:'横浜の街と港を一望できる展望タワー。', student:{ available:true, price:{ student:500, adult:1000 }, condition:'平日デイ 小中500円／高校生以上1,000円（時間帯で変動）', url:'https://marinetower.yokohama/price-hours/' } }
+];
+
+const GEO_TREE = {
+  '関東': {
+    center:[35.68,139.76], radius:180000, zoom:8,
+    prefs:{
+      '神奈川県':{
+        center:[35.4478,139.6425], radius:65000, zoom:10,
+        cities:{
+          '横浜市': { center:[35.4478,139.6425], radius:18000, zoom:13 },
+          '川崎市': { center:[35.5308,139.7036], radius:14000, zoom:13 },
+          '鎌倉市': { center:[35.3192,139.5467], radius: 9000, zoom:13 }
+        }
+      },
+      '東京都':{
+        center:[35.6762,139.6503], radius:50000, zoom:10,
+        cities:{
+          '千代田区':{ center:[35.6938,139.7530], radius:3000, zoom:13 },
+          '新宿区':  { center:[35.6938,139.7034], radius:4000, zoom:13 }
+        }
+      }
+    }
+  }
+};
+
+/* ===== 便利関数 ===== */
+const fmt = n => new Intl.NumberFormat('ja-JP').format(n);
+const fmt1= n => new Intl.NumberFormat('ja-JP',{maximumFractionDigits:1}).format(n);
+const yen = v => v==null ? '—' : `¥${fmt(v)}`;
+const norm= s => (s||'').toString().trim().toLowerCase();
+const tokens=q => norm(q).split(/\s+/).filter(Boolean);
+const osmLink = (lat, lon, z=16)=>`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=${z}/${lat}/${lon}`;
+const R=6371; const haversineKm=(a,b)=>{const r=x=>x*Math.PI/180;const dLat=r(b[0]-a[0]),dLon=r(b[1]-a[1]),la1=r(a[0]),la2=r(b[0]);const h=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(h));};
+const showToast=m=>{const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1500);};
+
+/* ===== 地図・マーカー ===== */
+let map, cluster, selectionLayer=null, centerDot=null, currentLoc=null, selectedId=null;
+const defaultCenter=[35.4478,139.6425], defaultZoom=13;
+const markerPool = new Map();
+
+/* 地理スコープ円 */
+let geoScope = { level:null, key:null, center:null, radius:null, zoom:null };
+let geoCircle = null;
+
+function initMap(){
+  map = L.map('map', { boxZoom:true }).setView(defaultCenter, defaultZoom); // Shift+ドラッグで矩形
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OpenStreetMap contributors' }).addTo(map);
+
+  cluster = L.markerClusterGroup();
+  map.addLayer(cluster);
+
+  // ピン常設
+  PLACES.forEach(p=>{
+    const m = L.marker([p.lat,p.lon]);
+    m.bindPopup(`<strong>${p.name}</strong><br>${p.desc||''}`);
+    m.on('click', ()=>{ selectedId=p.id; highlightSelected(); openPanelFor(p); });
+    markerPool.set(p.id, m);
+  });
+  syncMarkers(new Set(PLACES.map(p=>p.id)));
+
+  // タップ/クリック → 円
+  map.on('click', (e)=> placeCircleAt(e.latlng));
+
+  // Shift+ドラッグ → Leafletのboxzoomで矩形選択
+  map.on('boxzoomend', (ev)=>{
+    if (!ev.boxZoomBounds) return;
+    if (selectionLayer){ selectionLayer.remove(); selectionLayer=null; }
+    if (centerDot){ centerDot.remove(); centerDot=null; }
+    selectionLayer = L.rectangle(ev.boxZoomBounds, {color:'#2563eb',weight:2,fillColor:'#2563eb',fillOpacity:.12,interactive:false}).addTo(map);
+    applyFilters();
+  });
+
+  map.on('moveend', ()=>{ if (document.getElementById('boundsOnly').checked) applyFilters(); });
+}
+
+function placeCircleAt(latlng){
+  const r = +document.getElementById('radius').value || 600;
+  if (selectionLayer) selectionLayer.remove();
+  if (centerDot) centerDot.remove();
+  selectionLayer = L.circle(latlng, { radius:r, color:'#10b981', fillColor:'#10b981', fillOpacity:.12, weight:2 }).addTo(map);
+  centerDot = L.circleMarker(latlng, { radius:5, color:'#065f46', fillColor:'#10b981', fillOpacity:1, weight:2 }).addTo(map);
+  applyFilters();
+}
+
+function syncMarkers(keepIds){
+  const current = new Set();
+  cluster.eachLayer(l=>{
+    for (const [id, mk] of markerPool) if (mk===l){ current.add(id); break; }
+  });
+  for (const id of keepIds){ if (!current.has(id)) { const mk=markerPool.get(id); if (mk) cluster.addLayer(mk); } }
+  for (const id of current){ if (!keepIds.has(id)) { const mk=markerPool.get(id); if (mk) cluster.removeLayer(mk); } }
+}
+
+/* ===== カスケードUI ===== */
+const regionSelect = document.getElementById('regionSelect');
+const prefSelect   = document.getElementById('prefSelect');
+const citySelect   = document.getElementById('citySelect');
+
+function populatePrefs(regionKey){
+  prefSelect.innerHTML = '<option value="">都道府県（まず地方を選択）</option>';
+  citySelect.innerHTML = '<option value="">市区町村（まず都道府県を選択）</option>';
+  citySelect.disabled = true;
+  const region = GEO_TREE[regionKey];
+  if (!region){ prefSelect.disabled = true; return; }
+  Object.keys(region.prefs).forEach(pk=>{
+    const opt=document.createElement('option'); opt.value=pk; opt.textContent=pk; prefSelect.appendChild(opt);
+  });
+  prefSelect.disabled = false;
+}
+function populateCities(regionKey, prefKey){
+  citySelect.innerHTML = '<option value="">市区町村（任意）</option>';
+  const pref = GEO_TREE[regionKey]?.prefs?.[prefKey];
+  if (!pref){ citySelect.disabled = true; return; }
+  Object.keys(pref.cities||{}).forEach(ck=>{
+    const opt=document.createElement('option'); opt.value=ck; opt.textContent=ck; citySelect.appendChild(opt);
+  });
+  citySelect.disabled = false;
+}
+function setGeoScopeByUI(){
+  const regionKey = regionSelect.value || null;
+  const prefKey   = prefSelect.value   || null;
+  const cityKey   = citySelect.value   || null;
+
+  if (cityKey && regionKey && prefKey){
+    const c = GEO_TREE[regionKey].prefs[prefKey].cities[cityKey];
+    geoScope = { level:'city', key:cityKey, center:c.center, radius:c.radius, zoom:c.zoom||13 };
+  } else if (prefKey && regionKey){
+    const p = GEO_TREE[regionKey].prefs[prefKey];
+    geoScope = { level:'pref', key:prefKey, center:p.center, radius:p.radius, zoom:p.zoom||10 };
+  } else if (regionKey){
+    const r = GEO_TREE[regionKey];
+    geoScope = { level:'region', key:regionKey, center:r.center, radius:r.radius, zoom:r.zoom||8 };
+  } else {
+    geoScope = { level:null, key:null, center:null, radius:null, zoom:null };
+  }
+  drawGeoCircle(); applyFilters();
+}
+function drawGeoCircle(){
+  if (geoCircle){ geoCircle.remove(); geoCircle=null; }
+  if (geoScope.center && geoScope.radius){
+    geoCircle = L.circle(geoScope.center, { radius:geoScope.radius, color:'#6366f1', weight:2, dashArray:'6 6', fillColor:'#6366f1', fillOpacity:.06 }).addTo(map);
+    map.setView(geoScope.center, geoScope.zoom || map.getZoom());
+  }
+}
+document.getElementById('clearGeo').addEventListener('click', ()=>{
+  regionSelect.value=''; prefSelect.innerHTML='<option value="">都道府県（まず地方を選択）</option>'; prefSelect.disabled=true;
+  citySelect.innerHTML='<option value="">市区町村（まず都道府県を選択）</option>'; citySelect.disabled=true;
+  geoScope = { level:null, key:null, center:null, radius:null, zoom:null };
+  if (geoCircle){ geoCircle.remove(); geoCircle=null; }
+  applyFilters();
+});
+regionSelect.addEventListener('change', ()=>{ populatePrefs(regionSelect.value); setGeoScopeByUI(); });
+prefSelect.addEventListener('change',  ()=>{ populateCities(regionSelect.value, prefSelect.value); setGeoScopeByUI(); });
+citySelect.addEventListener('change',  ()=> setGeoScopeByUI());
+
+/* ===== 円UI（スライダー/プリセット/現在地中心） ===== */
+const radiusInput=document.getElementById('radius'), radiusVal=document.getElementById('radiusVal');
+radiusInput.addEventListener('input', ()=>{
+  radiusVal.textContent=`${radiusInput.value}m`;
+  document.querySelectorAll('.pill').forEach(p=> p.classList.toggle('active', +p.dataset.r===+radiusInput.value));
+  if (selectionLayer instanceof L.Circle){ selectionLayer.setRadius(+radiusInput.value); applyFilters(); }
+});
+document.querySelectorAll('.pill').forEach(p=>{
+  p.addEventListener('click', ()=>{ radiusInput.value=p.dataset.r; radiusInput.dispatchEvent(new Event('input')); });
+});
+document.getElementById('centerHere').addEventListener('click', ()=>{
+  if (!currentLoc){ showToast('まず「現在地」を取得してください'); return; }
+  placeCircleAt(L.latLng(currentLoc.lat, currentLoc.lon));
+});
+radiusInput.addEventListener('touchstart', ()=> map.dragging.disable());
+radiusInput.addEventListener('touchend',   ()=> map.dragging.enable());
+
+/* ===== 絞り込み ===== */
+function inSelection(lat,lon){
+  if (!selectionLayer) return true;
+  const ll = L.latLng(lat,lon);
+  if (selectionLayer instanceof L.Circle)   return ll.distanceTo(selectionLayer.getLatLng()) <= selectionLayer.getRadius();
+  if (selectionLayer instanceof L.Rectangle) return selectionLayer.getBounds().contains(ll);
+  return true;
+}
+function inGeoScope(lat,lon){
+  if (!geoScope.center || !geoScope.radius) return true;
+  return L.latLng(lat,lon).distanceTo(L.latLng(geoScope.center[0], geoScope.center[1])) <= geoScope.radius;
+}
+function filterPlaces(query, opts){
+  const ts=tokens(query); let arr=PLACES.slice();
+
+  // 地理（地方→都道府県→市）→ 選択図形（円/□）→ 表示範囲 → テキスト → 学割 → 距離順
+  arr = arr.filter(p=> inGeoScope(p.lat,p.lon));
+  arr = arr.filter(p=> inSelection(p.lat,p.lon));
+  if (opts.boundsOnly){ const b=map.getBounds(); arr=arr.filter(p=>b.contains([p.lat,p.lon])); }
+  if (ts.length){
+    arr=arr.filter(p=>{
+      const hay=(p.name+'\u0000'+(p.tags||[]).join('\u0000')).toLowerCase();
+      return ts.every(t=>hay.includes(t));
+    });
+  }
+  if (opts.onlyDiscount) arr=arr.filter(p=>p.student?.available);
+  if (opts.sortByDistance && currentLoc){
+    arr.forEach(p=>p._d=haversineKm([currentLoc.lat,currentLoc.lon],[p.lat,p.lon]));
+    arr.sort((a,b)=>(a._d||1e9)-(b._d||1e9));
+  } else arr.forEach(p=>delete p._d);
+  return arr;
+}
+
+/* ===== リスト＆ピン同期 ===== */
+function render(list){
+  const listEl=document.getElementById('list'); listEl.innerHTML='';
+  document.getElementById('resultCount').textContent=`— ${fmt(list.length)}件`;
+
+  if(!list.length){ listEl.innerHTML='<p class="muted" style="margin:8px">該当スポットが見つかりませんでした。</p>'; }
+
+  list.forEach(p=>{
+    const st=p.student, price=st?.available?`<span class="price">学生 ${yen(st.price?.student)}${st.price?.adult!=null?`／一般 ${yen(st.price.adult)}`:''}</span>`:'';
+    const item=document.createElement('div');
+    item.className='item'; item.dataset.id=p.id;
+    item.innerHTML=`
+      <h3>${p.name}${st?.available?' <span class="tag">学割</span>':''}</h3>
+      <p class="muted">${p.desc||''}</p>
+      <div class="row">${(p.tags||[]).map(t=>`<span class="tag">${t}</span>`).join(' ')}</div>
+      ${st?.available?`<div class="row">${price} <small class="muted">${st.condition||''}</small></div>`:''}
+      <div class="row">
+        <button type="button" class="btn" data-action="map">地図で見る</button>
+        <button type="button" class="btn" data-action="detail">詳細</button>
+        <a class="btn" href="${osmLink(p.lat,p.lon)}" target="_blank" rel="noopener">OSMで開く</a>
+        ${p._d!=null?`<small class="muted">／ 約 ${fmt1(p._d)} km</small>`:''}
+      </div>`;
+    item.querySelector('[data-action="map"]').addEventListener('click', ()=>{
+      map.setView([p.lat,p.lon],16);
+      const mk=markerPool.get(p.id); if (mk){ mk.openPopup(); }
+      selectedId=p.id; highlightSelected();
+    });
+    item.querySelector('[data-action="detail"]').addEventListener('click', ()=> openPanelFor(p));
+    listEl.appendChild(item);
+  });
+
+  const keep = new Set(list.map(p=>p.id));
+  syncMarkers(keep);
+
+  const stat = (selectionLayer instanceof L.Circle)   ? `選択範囲：円（半径 約 ${document.getElementById('radius').value} m）`
+             : (selectionLayer instanceof L.Rectangle)? '選択範囲：四角（Shift+ドラッグで変更）'
+             : (geoScope.level ? `地域：${geoScope.key}（${geoScope.level}）` : '選択範囲：なし（地図をタップ / Shift+ドラッグ）');
+  document.getElementById('stat').textContent = stat;
+}
+function highlightSelected(){ document.querySelectorAll('.item').forEach(el=> el.classList.toggle('selected', el.dataset.id===selectedId)); }
+
+/* ===== 適用／現在地 ===== */
+function applyFilters(){
+  const q=document.getElementById('q').value;
+  const list=filterPlaces(q,{
+    onlyDiscount: document.getElementById('onlyDiscount').checked,
+    boundsOnly:   document.getElementById('boundsOnly').checked,
+    sortByDistance: document.getElementById('sortByDistance').checked && !!currentLoc
+  });
+  render(list);
+}
+
+function locate(){
+  if(!navigator.geolocation){ showToast('現在地が使えません'); return; }
+  navigator.geolocation.getCurrentPosition(pos=>{
+    currentLoc={lat:pos.coords.latitude, lon:pos.coords.longitude};
+    L.circleMarker([currentLoc.lat,currentLoc.lon]).addTo(map).bindPopup('現在地').openPopup();
+    map.setView([currentLoc.lat,currentLoc.lon],15);
+    document.getElementById('geoStatus').textContent=`現在地: ${currentLoc.lat.toFixed(4)}, ${currentLoc.lon.toFixed(4)}`;
+    applyFilters();
+  }, err=> showToast('位置エラー: '+err.message), {enableHighAccuracy:true, timeout:7000, maximumAge:60000});
+}
+
+/* ===== スライドパネル（詳細） ===== */
+const slidePanel = document.getElementById('slidePanel');
+const panelTitle = document.getElementById('panelTitle');
+const panelContent = document.getElementById('panelContent');
+const panelLink = document.getElementById('panelLink');
+document.getElementById('closePanel').addEventListener('click', ()=> slidePanel.classList.remove('is-active'));
+function openPanelFor(p){
+  panelTitle.textContent = p.name;
+  panelContent.innerHTML = `
+    <p>${p.desc||''}</p>
+    <p>${(p.tags||[]).map(t=>`<span class="tag" style="background:#374151;color:#e5e7eb">${t}</span>`).join(' ')}</p>
+    ${p.student?.available ? `<p><strong>学割:</strong> 学生 ${yen(p.student.price?.student)}${p.student.price?.adult!=null?`／一般 ${yen(p.student.price.adult)}`:''}<br><small>${p.student.condition||''}</small></p>` : '<p><small>学割情報はありません</small></p>'}
+    <p><a href="${osmLink(p.lat,p.lon)}" target="_blank" rel="noopener" style="color:#93c5fd">OpenStreetMapで開く</a></p>
+  `;
+  panelLink.href = p.student?.url || osmLink(p.lat,p.lon);
+  panelLink.textContent = p.student?.url ? '学割/公式ページへ' : 'OSMで開く';
+  slidePanel.classList.add('is-active');
+}
+
+/* ===== コメント（ローカル保存） ===== */
+const keyComments='yokohama.demo.comments';
+function loadComments(){ try{return JSON.parse(localStorage.getItem(keyComments)||'[]')}catch{return[]} }
+function saveComments(list){ localStorage.setItem(keyComments, JSON.stringify(list)); }
+function renderComments(){
+  const box=document.getElementById('commentList'); box.innerHTML='';
+  const list=loadComments();
+  list.slice().reverse().forEach(c=>{
+    const el=document.createElement('div');
+    el.className='comment';
+    el.innerHTML=`<strong>${c.name||'名無しさん'}</strong> <small>${new Date(c.ts).toLocaleString()}</small><p style="margin:.4em 0 0">${c.text}</p>`;
+    box.appendChild(el);
+  });
+}
+document.getElementById('commentForm').addEventListener('submit', e=>{
+  e.preventDefault();
+  const name=document.getElementById('cName').value.trim();
+  const text=document.getElementById('cText').value.trim();
+  if(!text) return;
+  const list=loadComments(); list.push({name,text,ts:Date.now()}); saveComments(list);
+  document.getElementById('cText').value=''; renderComments();
+});
+
+/* ===== 起動・イベント ===== */
+initMap(); render(PLACES); renderComments();
+
+document.getElementById('searchForm').addEventListener('submit', e=>{ e.preventDefault(); applyFilters(); });
+document.getElementById('q').addEventListener('input', ()=> applyFilters());
+document.getElementById('onlyDiscount').addEventListener('change', applyFilters);
+document.getElementById('boundsOnly').addEventListener('change', applyFilters);
+document.getElementById('sortByDistance').addEventListener('change', ()=>{
+  if (document.getElementById('sortByDistance').checked && !currentLoc) showToast('距離順には現在地が必要です');
+  applyFilters();
+});
+document.getElementById('locateBtn').addEventListener('click', locate);
+
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  document.getElementById('q').value='';
+  ['onlyDiscount','boundsOnly','sortByDistance'].forEach(id=>document.getElementById(id).checked=false);
+  if (selectionLayer){ selectionLayer.remove(); selectionLayer=null; }
+  if (centerDot){ centerDot.remove(); centerDot=null; }
+  if (geoCircle){ geoCircle.remove(); geoCircle=null; }
+  geoScope = { level:null, key:null, center:null, radius:null, zoom:null };
+  regionSelect.value=''; prefSelect.innerHTML='<option value="">都道府県（まず地方を選択）</option>'; prefSelect.disabled=true;
+  citySelect.innerHTML='<option value="">市区町村（まず都道府県を選択）</option>'; citySelect.disabled=true;
+  selectedId=null; currentLoc=null; document.getElementById('geoStatus').textContent='';
+  map.setView(defaultCenter, defaultZoom);
+  render(PLACES);
+});
+
+document.getElementById('chips').addEventListener('click', e=>{
+  const b=e.target.closest('[data-city]'); if(!b) return;
+  regionSelect.value='関東'; populatePrefs('関東');
+  prefSelect.value='神奈川県'; populateCities('関東','神奈川県');
+  citySelect.value=b.getAttribute('data-city'); setGeoScopeByUI();
+  document.getElementById('q').value = b.getAttribute('data-query') || '';
+  applyFilters();
+});
+</script>
+</body>
+</html>
