@@ -3,127 +3,229 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>地方→都道府県→市 + タップで円 / Shift+ドラッグで四角（OSM・場所別コメント/星評価）</title>
+<title>Lagrangelo web開発チーム — 観光スポット検索デモ（OSM・カードUI・口コミ）</title>
 
+<!-- Fonts（柔らかい丸ゴ） -->
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap" rel="stylesheet">
+
+<!-- Leaflet / Cluster -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
 
 <style>
-  :root{ --maxw:1100px; --gap:14px; --radius:14px; --border:#e5e7eb; --muted:#64748b; --accent:#6366f1; --green:#10b981 }
+  :root{
+    --maxw:1100px; --gap:16px; --radius:16px;
+    /* Blue theme */
+    --ink:#0f172a; --muted:#64748b; --border:#dbe2f3;
+    --bg:#f5f8ff; --card:#ffffff;
+    --accent:#3b82f6;   /* blue-500 */
+    --accent-2:#2563eb; /* blue-600 */
+    --accent-3:#dbeafe; /* blue-100 */
+    --shadow:0 12px 28px #0b1b3a14;
+  }
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent }
-  html,body{ height:100% } body{ margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif; color:#0f172a; background:#f7f8fc }
+  html,body{ height:100% }
+  body{
+    margin:0; color:var(--ink); background:var(--bg);
+    font-family:"Zen Maru Gothic","Noto Sans JP",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif
+  }
 
-  header,main,footer{ width:min(100%,var(--maxw)); margin:0 auto; padding:16px }
-  header{ display:flex; align-items:center; justify-content:space-between; gap:12px }
-  header h1{ margin:0; font-size:clamp(18px,2vw+12px,28px) }
-  .btn-login{ padding:10px 14px; border-radius:999px; background:#111827; color:#fff; text-decoration:none; font-weight:600 }
+  /* Top Nav */
+  .nav{ position:sticky; top:0; z-index:40; background:#fff; border-bottom:1px solid var(--border) }
+  .nav-inner{ width:min(100%,var(--maxw)); margin:0 auto; padding:10px 16px;
+              display:flex; align-items:center; justify-content:space-between; gap:12px }
+  .brand{ display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.02em; }
+  .brand .badge{ width:28px; height:28px; border-radius:8px; background:linear-gradient(135deg,var(--accent),var(--accent-2)) }
+  .login{ display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:999px;
+          background:#111827; color:#fff; text-decoration:none; font-weight:700 }
 
-  .layout{ display:grid; gap:var(--gap); grid-template-columns:1fr }
-  @media(min-width:900px){ .layout{ grid-template-columns:360px 1fr } }
+  /* Hero */
+  .hero{
+    background:
+      radial-gradient(1200px 600px at 80% -20%, #eaf2ff 0%, transparent 55%),
+      linear-gradient(180deg, #fff 0%, #fff 40%, #eef5ff 100%);
+    border-bottom:1px solid var(--border);
+  }
+  .hero-inner{ width:min(100%,var(--maxw)); margin:0 auto; padding:28px 16px 24px }
+  .hero h1{ margin:0 0 10px; font-size:clamp(22px,2.4vw+14px,36px); line-height:1.2; letter-spacing:.02em }
+  .hero p{ margin:0; color:#3a4a60; font-size:clamp(14px,1.2vw+10px,18px) }
 
-  .panel{ border:1px solid var(--border); border-radius:var(--radius); background:#fff; overflow:clip; box-shadow:0 10px 24px #00000010 }
-  .panel h2{ margin:0; padding:12px 14px; font-size:18px; border-bottom:1px solid var(--border); background:#fafafa; position:sticky; top:0; z-index:1 }
-
-  /* 中央揃え：左が入力・右がボタン */
+  /* Search Card */
+  .wrap{ width:min(100%,var(--maxw)); margin:0 auto; padding:16px }
+  .search-card{ background:var(--card); border:1px solid var(--border); border-radius:22px; box-shadow:var(--shadow); overflow:hidden }
+  .search-top{ padding:16px; border-bottom:1px solid var(--border) }
   .search-wrap{ display:flex; justify-content:center }
-  .search-bar{ display:grid; grid-template-columns:1fr auto; gap:8px; width:min(720px,92vw) }
-  .search-bar input{ padding:14px 16px; font-size:16px; border:1px solid var(--border); border-radius:14px }
-  .search-bar button{ padding:14px 16px; font-size:16px; border-radius:14px; border:1px solid transparent; background:#6366f1; color:#fff; cursor:pointer }
+  .search-bar{ display:grid; grid-template-columns:1fr auto; gap:8px; width:min(820px,94vw) }
+  .search-bar input{ padding:16px 18px; font-size:16px; border:1px solid var(--border); border-radius:999px; background:#ffffff }
+  .search-bar button{
+    padding:16px 18px; font-size:16px; border-radius:999px; border:1px solid transparent;
+    background:linear-gradient(180deg,var(--accent),var(--accent-2)); color:#fff; font-weight:700; cursor:pointer;
+    box-shadow:0 6px 16px #3b82f633
+  }
 
-  .filters{ display:flex; gap:10px; align-items:center; margin-top:8px; color:#334155; font-size:15px; flex-wrap:wrap; justify-content:center }
-  .chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; justify-content:center }
+  .geo-cascade{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:12px }
+  .geo-cascade select{
+    appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    padding:12px 14px; border:1px solid var(--border); border-radius:12px; background:#fff url("data:image/svg+xml,%3Csvg width='14' height='10' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l6 6 6-6' stroke='%2364748b' stroke-width='2' fill='none'/%3E%3C/svg%3E") no-repeat right 10px center/14px 10px;
+    min-width: 200px; font-size:14px; color:var(--ink)
+  }
+  .chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; justify-content:center; padding-bottom:6px }
   .chip{ padding:6px 10px; border:1px solid var(--border); border-radius:999px; font-size:14px; background:#fff; cursor:pointer }
-  .muted{ color:#64748b }
 
-  .list{ padding:10px; display:grid; gap:10px; max-height:70vh; overflow:auto }
-  .item{ border:1px solid var(--border); border-radius:14px; padding:12px; background:#fff }
-  .item.selected{ border-color:var(--accent); box-shadow:0 0 0 4px #6366f133 }
-  .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center }
-  .tag{ font-size:12px; color:#475569; background:#f1f5f9; padding:4px 10px; border-radius:999px }
-  .btn{ display:inline-flex; align-items:center; gap:8px; padding:10px 12px; min-height:40px; border-radius:12px; border:1px solid var(--border); background:#fff; text-decoration:none; color:#0f172a; cursor:pointer; font-size:14px }
-  .btn-discount{ background:#10b981; color:#fff; border-color:#10b981; font-weight:600 }
+  .filters{ display:flex; gap:10px; align-items:center; color:#334155; font-size:15px; flex-wrap:wrap; justify-content:center; padding:12px 16px }
 
-  #map{ width:100%; height:60vh; min-height:52vh; border:1px solid var(--border); border-radius:var(--radius) }
-  .mapbar{ display:flex; gap:8px; align-items:center; padding:10px 12px; border-top:1px solid var(--border); background:#fafafa; flex-wrap:wrap }
+  /* Layout */
+  .layout{ display:grid; gap:var(--gap); grid-template-columns:1fr; padding:16px }
+  @media(min-width:900px){ .layout{ grid-template-columns:420px 1fr } }
+
+  .panel{ border:1px solid var(--border); border-radius:20px; background:var(--card); overflow:clip; box-shadow:0 10px 24px #0000000a }
+  .panel h2{ margin:0; padding:12px 14px; font-size:18px; border-bottom:1px solid var(--border); background:#fff;
+             letter-spacing:.02em }
+
+  /* Card list */
+  .list{ padding:12px; display:grid; gap:12px; max-height:70vh; overflow:auto }
+  .card{
+    border:1px solid var(--border); border-radius:18px; background:#fff; overflow:hidden;
+    transition:transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+  }
+  .card:hover{ transform:translateY(-2px); box-shadow:0 10px 24px #00000014; }
+  .card.selected{ box-shadow:0 0 0 4px #3b82f622; border-color:var(--accent); }
+  .card-hero{
+    position:relative; width:100%; aspect-ratio:16/9; background:linear-gradient(180deg,#eef2ff,#fff);
+    display:block; overflow:hidden;
+  }
+  .card-hero img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .card-hero .badge{
+    position:absolute; left:10px; top:10px; background:#f8fbffcc; border:1px solid var(--border);
+    color:#1f2a44; padding:6px 10px; border-radius:999px; font-size:12px; backdrop-filter:blur(4px);
+  }
+  .card-hero .rating{
+    position:absolute; right:10px; top:10px; background:#1f2937cc; color:#fff; padding:6px 10px; border-radius:999px;
+    font-size:12px; display:flex; align-items:center; gap:6px; backdrop-filter:blur(4px);
+  }
+  .stars{ display:inline-flex; gap:2px; user-select:none }
+  .star{ font-size:14px; line-height:1; color:#d1d5db }
+  .star.filled{ color:#d1a23e } /* 星は金色のまま */
+
+  .card-body{ padding:12px 12px 14px; display:grid; gap:8px }
+  .card h3{ margin:0; font-size:16px; letter-spacing:.01em }
+  .muted{ color:var(--muted) }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center }
+  .tag{ font-size:12px; color:#334155; background:#eef2ff; padding:4px 10px; border-radius:999px; border:1px solid var(--accent-3) }
+  .btn{ display:inline-flex; align-items:center; gap:8px; padding:10px 12px; min-height:40px; border-radius:12px; border:1px solid var(--border); background:#fff; text-decoration:none; color:var(--ink); cursor:pointer; font-size:14px }
+  .btn.primary{ background:linear-gradient(180deg,var(--accent),var(--accent-2)); color:#fff; border-color:transparent; font-weight:700 }
+  .btn.ghost{ background:#fff; border-color:var(--accent-3); color:#1f2a44; }
+
+  #map{ width:100%; height:60vh; min-height:52vh; border:1px solid var(--border); border-radius:20px }
+  .mapbar{ display:flex; gap:8px; align-items:center; padding:10px 12px; border-top:1px solid var(--border); background:#fff; flex-wrap:wrap }
   .radiusWrap{ display:flex; gap:8px; align-items:center }
   input[type="range"]{ touch-action:none }
   .pills{ display:flex; gap:6px; flex-wrap:wrap }
-  .pill{ padding:6px 10px; border:1px solid var(--border); border-radius:999px; font-size:13px; background:#fff; cursor:pointer }
-  .pill.active{ border-color:#0ea5e9; box-shadow:0 0 0 3px #0ea5e922 }
+  .pill{ padding:6px 10px; border:1px solid var(--accent-3); border-radius:999px; font-size:13px; background:#fff; cursor:pointer }
+  .pill.active{ border-color:var(--accent); box-shadow:0 0 0 3px #3b82f622 }
 
-  /* 地理カスケード */
-  .geo-cascade{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:10px }
-  .geo-cascade select{
-    appearance:none; -webkit-appearance:none; -moz-appearance:none;
-    padding:12px 14px; border:1px solid var(--border); border-radius:12px; background:#fff url("data:image/svg+xml,%3Csvg width='14' height='10' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l6 6 6-6' stroke='%2364768b' stroke-width='2' fill='none'/%3E%3C/svg%3E") no-repeat right 10px center/14px 10px;
-    min-width: 200px; font-size:14px; color:#0f172a;
+  /* Tag filter bar */
+  .tagbar{ display:flex; flex-wrap:wrap; gap:8px; justify-content:center; padding:10px 14px 16px; }
+  .tagchip{
+    padding:8px 12px; border:1px solid var(--accent-3); background:#f8fbff; color:#1f2a44;
+    border-radius:999px; font-size:13px; cursor:pointer; transition:box-shadow .15s, border-color .15s, background .15s;
   }
+  .tagchip:hover{ box-shadow:0 2px 10px #0000000b; }
+  .tagchip.active{ border-color:var(--accent); background:linear-gradient(180deg, #eef2ff, #fff); box-shadow:0 0 0 3px #3b82f622; }
 
-  .toast{ position:fixed; left:50%; transform:translateX(-50%); bottom:16px; background:#111827; color:#fff; padding:10px 14px; border-radius:12px; font-size:14px; opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:9999 }
-  .toast.show{ opacity:1; transform:translateX(-50%) translateY(-4px) }
+  footer{ width:min(100%,var(--maxw)); margin:0 auto; padding:24px 16px; color:var(--muted); font-size:13px }
 
-  /* 下からスライドの詳細パネル（場所別コメント/星評価込み） */
-  .panel-detail{ position:fixed; left:0; right:0; bottom:0; height:min(75vh,560px); background:#1f2937; color:#fff; border-radius:16px 16px 0 0; box-shadow:0 -10px 30px #0005; transform:translateY(100%); transition:transform .28s ease; z-index:10000; display:grid; grid-template-rows:auto 1fr auto; gap:12px; padding:16px }
+  /* Slide panel (detail / comments) */
+  .panel-detail{
+    position:fixed; left:0; right:0; bottom:0; height:min(76vh,560px); background:#0f172a; color:#fff;
+    border-radius:16px 16px 0 0; box-shadow:0 -10px 30px #0005;
+    transform:translateY(100%); transition:transform .28s ease; z-index:10000;
+    display:grid; grid-template-rows:auto 1fr auto; gap:12px; padding:16px; overflow:hidden;
+  }
   .panel-detail.is-active{ transform:translateY(0) }
-  .panel-detail h3{ margin:0 }
-  .panel-detail .content{ overflow:auto; display:grid; gap:12px }
-  .panel-detail .actions{ display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end }
+  .panel-detail .content{
+    min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch;
+  }
   .closeBtn{ background:#111827; color:#fff; border:1px solid #374151; border-radius:10px; padding:8px 12px; cursor:pointer }
-
-  /* 星表示＆入力 */
-  .rating-summary{ display:flex; align-items:center; gap:8px; flex-wrap:wrap }
-  .stars{ display:inline-flex; gap:2px; user-select:none }
-  .star{ font-size:20px; line-height:1; color:#d1d5db }
-  .star.filled{ color:#f59e0b } /* amber-500 */
-
-  .rating-input{ display:flex; align-items:center; gap:6px }
-  .star-btn{ font-size:24px; line-height:1; background:none; border:none; cursor:pointer; color:#d1d5db; padding:4px }
-  .star-btn.active, .star-btn:hover, .star-btn:focus{ color:#f59e0b; outline:none }
-
-  /* コメント表示/投稿 */
-  .comment-block{ background:#111827; border:1px solid #374151; border-radius:12px; padding:12px }
-  .comment-line{ background:#111827; border:1px solid #374151; border-radius:12px; padding:10px 12px }
+  .comment-block{ background:#0b1220; border:1px solid #374151; border-radius:12px; padding:12px }
+  .comment-line{ background:#0b1220; border:1px solid #374151; border-radius:12px; padding:10px 12px }
   .comment-line + .comment-line{ margin-top:8px }
   .comment-line small{ color:#9ca3af }
   .comment-form{ display:grid; gap:8px }
-  .comment-form input,.comment-form textarea{ padding:10px 12px; border:1px solid #374151; border-radius:10px; font-size:14px; background:#0b1220; color:#fff }
+  .comment-form input,.comment-form textarea{ padding:10px 12px; border:1px solid #374151; border-radius:10px; font-size:14px; background:#081120; color:#fff }
   .comment-form button{ background:#2563eb; color:#fff; border:1px solid #2563eb; border-radius:10px; padding:10px 12px; cursor:pointer }
   .muted-on-dark{ color:#9ca3af }
   a.link-on-dark{ color:#93c5fd }
+
+  /* Toast */
+  .toast{ position:fixed; left:50%; transform:translateX(-50%); bottom:16px; background:#111827; color:#fff;
+          padding:10px 14px; border-radius:12px; font-size:14px; opacity:0; pointer-events:none;
+          transition:opacity .2s, transform .2s; z-index:9999 }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(-4px) }
 </style>
 </head>
 <body>
-<header>
-  <h1>地方⇒都道府県⇒市（OSM・場所別コメント/星評価）</h1>
-  <a class="btn-login" href="https://lagrangero-group4.web.app/?v=2" target="_blank" rel="noopener">ログイン</a>
-</header>
 
-<main>
-  <section>
-    <div class="search-wrap">
-      <form id="searchForm" class="search-bar" novalidate>
-        <input id="q" type="search" inputmode="search" placeholder="キーワード（未入力でもOK：下の地域/範囲で絞込）">
-        <button>検索</button>
-      </form>
+<!-- Nav -->
+<div class="nav">
+  <div class="nav-inner">
+    <div class="brand">
+      <span class="badge" aria-hidden="true"></span>
+      <span>Lagrangelo web開発チーム</span>
+    </div>
+    <a class="login" href="https://lagrangero-group4.web.app/?v=2" target="_blank" rel="noopener">ログイン</a>
+  </div>
+</div>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-inner">
+    <h1>旅の「いいね」を地図で集める。</h1>
+    <p>雑誌のように眺めて、地図で絞り込む。地方→都道府県→市のドリルダウン、地図タップの半径検索＆Shift+ドラッグの四角選択、タグでの発見、さらに場所ごとの口コミと★評価まで、ワンページで完結。</p>
+  </div>
+</section>
+
+<!-- Search & controls -->
+<div class="wrap">
+  <div class="search-card">
+    <div class="search-top">
+      <div class="search-wrap">
+        <form id="searchForm" class="search-bar" novalidate>
+          <input id="q" type="search" inputmode="search" placeholder="キーワード（未入力でもOK：地域/タグ/範囲で絞込）">
+          <button>検索</button>
+        </form>
+      </div>
+
+      <div class="geo-cascade">
+        <select id="regionSelect" aria-label="地方">
+          <option value="">地方（未選択）</option>
+          <option value="関東">関東</option>
+        </select>
+        <select id="prefSelect" aria-label="都道府県" disabled>
+          <option value="">都道府県（まず地方を選択）</option>
+        </select>
+        <select id="citySelect" aria-label="市区町村" disabled>
+          <option value="">市区町村（まず都道府県を選択）</option>
+        </select>
+        <button id="clearGeo" class="btn ghost" type="button">× 地域クリア</button>
+      </div>
+
+      <div class="chips" id="chips">
+        <button class="chip" data-city="横浜市" data-query="中華街"># 中華街</button>
+        <button class="chip" data-city="横浜市" data-query="みなとみらい"># みなとみらい</button>
+        <button class="chip" data-city="横浜市" data-query="山下公園"># 山下公園</button>
+        <button class="chip" data-city="横浜市" data-query="赤レンガ"># 赤レンガ倉庫</button>
+        <button class="chip" data-city="横浜市" data-query="三溪園"># 三溪園</button>
+      </div>
+
+      <!-- タグフィルタ（自動生成） -->
+      <div class="tagbar" id="tagBar" aria-label="タグで絞り込み"></div>
+      <div style="text-align:center; margin:-4px 0 4px;">
+        <button id="clearTags" class="btn ghost" type="button">タグ解除</button>
+      </div>
     </div>
 
-    <!-- 地方→都道府県→市 -->
-    <div class="geo-cascade">
-      <select id="regionSelect" aria-label="地方">
-        <option value="">地方（未選択）</option>
-        <option value="関東">関東</option>
-      </select>
-      <select id="prefSelect" aria-label="都道府県" disabled>
-        <option value="">都道府県（まず地方を選択）</option>
-      </select>
-      <select id="citySelect" aria-label="市区町村" disabled>
-        <option value="">市区町村（まず都道府県を選択）</option>
-      </select>
-      <button id="clearGeo" class="btn" type="button">× 地域クリア</button>
-    </div>
-
-    <!-- フィルタ -->
     <div class="filters">
       <label><input type="checkbox" id="onlyDiscount"> 学割ありのみ</label>
       <label><input type="checkbox" id="boundsOnly"> 表示範囲だけ</label>
@@ -132,26 +234,20 @@
       <button id="resetBtn" class="btn" type="button">↺ リセット</button>
       <small id="geoStatus" class="muted"></small>
     </div>
+  </div>
+</div>
 
-    <div class="chips" id="chips">
-      <button class="chip" data-city="横浜市" data-query="中華街"># 中華街</button>
-      <button class="chip" data-city="横浜市" data-query="みなとみらい"># みなとみらい</button>
-      <button class="chip" data-city="横浜市" data-query="山下公園"># 山下公園</button>
-      <button class="chip" data-city="横浜市" data-query="赤レンガ"># 赤レンガ倉庫</button>
-      <button class="chip" data-city="横浜市" data-query="三溪園"># 三溪園</button>
-    </div>
-  </section>
-
-  <section class="layout" style="margin-top:14px">
+<!-- Main -->
+<main class="wrap" style="padding-top:0">
+  <section class="layout">
     <div class="panel">
-      <h2>検索結果 <span id="resultCount" class="muted"></span></h2>
+      <h2>スポット <span id="resultCount" class="muted"></span></h2>
       <div class="list" id="list"></div>
     </div>
 
     <div class="panel">
       <h2 style="margin:0; padding:12px 14px;">地図（タップ＝円 / Shift+ドラッグ＝四角）</h2>
       <div id="map" aria-label="地図"></div>
-
       <div class="mapbar">
         <div class="radiusWrap">
           <span class="muted">半径</span>
@@ -171,38 +267,55 @@
   </section>
 </main>
 
-<footer>© 2025 Demo · タイル: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></footer>
+<footer>© 2025 Lagrangelo web開発チーム · タイル: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></footer>
 
-<!-- スライド詳細パネル（場所別コメント/星評価） -->
+<!-- Slide-in Detail Panel -->
 <div id="slidePanel" class="panel-detail" aria-live="polite">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-    <h3 id="panelTitle">詳細</h3>
+    <h3 id="panelTitle" style="margin:0">詳細</h3>
     <button id="closePanel" class="closeBtn" type="button">閉じる</button>
   </div>
   <div id="panelContent" class="content"></div>
   <div class="actions">
-    <a id="panelLink" class="btn" target="_blank" rel="noopener" href="#">関連リンクを開く</a>
+    <a id="panelLink" class="btn primary" target="_blank" rel="noopener" href="#">関連リンクを開く</a>
   </div>
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+<!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
-
 <script>
-/* ===== データ ===== */
+/* ===== データ（横浜サンプル：カード用thumb付き） ===== */
 const PLACES = [
-  { id:'chinatown',   name:'横浜中華街', lat:35.4437, lon:139.6380, tags:['中華街','グルメ','観光'], desc:'約600店が集まる日本最大級のチャイナタウン。', student:{ available:false, url:'https://www.chinatown.or.jp/' } },
-  { id:'akarenga',    name:'横浜赤レンガ倉庫', lat:35.4513, lon:139.6400, tags:['赤レンガ','イベント'], desc:'歴史的建造物を活用した商業＆イベント施設。通常入場無料（イベント別途）。', student:{ available:false, url:'https://www.yokohama-akarenga.jp/' } },
-  { id:'minatomirai', name:'みなとみらい21', lat:35.4540, lon:139.6326, tags:['みなとみらい','展望'], desc:'観光名所が点在するウォーターフロント地区。', student:{ available:false } },
-  { id:'yamashita',   name:'山下公園', lat:35.4433, lon:139.6507, tags:['公園','散策'], desc:'港に面した海辺の都市公園（入園無料）。', student:{ available:false, url:'https://www.yokohamajapan.com/things-to-do/detail.php?bbid=190' } },
-  { id:'cupnoodles',  name:'カップヌードルミュージアム 横浜', lat:35.4564, lon:139.6389, tags:['みなとみらい','博物館','体験'], desc:'インスタントラーメンの歴史と体験が楽しめるミュージアム。', student:{ available:true, price:{ student:0, adult:500 }, condition:'高校生以下は入館無料／大人（大学生以上）500円。体験は別料金。', url:'https://www.cupnoodles-museum.jp/en/yokohama/guide/admission/' } },
-  { id:'sankeien',    name:'三溪園', lat:35.4160, lon:139.6530, tags:['三溪園','庭園','文化'], desc:'歴史的建造物と四季の景観が美しい日本庭園。', student:{ available:true, price:{ student:200, adult:900 }, condition:'小・中学生200円／高校生以上900円', url:'https://www.sankeien.or.jp/price-service/' } },
-  { id:'osanbashi',   name:'大さん橋', lat:35.4519, lon:139.6523, tags:['海','建築','散策'], desc:'屋上広場は24時間開放のビュースポット（無料）。', student:{ available:false, url:'https://osanbashi.jp/en/rooftop/' } },
-  { id:'marinetower', name:'横浜マリンタワー', lat:35.4437, lon:139.6526, tags:['展望','山下公園'], desc:'横浜の街と港を一望できる展望タワー。', student:{ available:true, price:{ student:500, adult:1000 }, condition:'平日デイ 小中500円／高校生以上1,000円（時間帯で変動）', url:'https://marinetower.yokohama/price-hours/' } }
+  { id:'chinatown',   name:'横浜中華街', lat:35.4437, lon:139.6380, tags:['中華街','グルメ','観光'],
+    desc:'約600店が集まる日本最大級のチャイナタウン。', thumb:'https://source.unsplash.com/800x600/?yokohama,chinatown,lantern',
+    student:{ available:false, url:'https://www.chinatown.or.jp/' } },
+  { id:'akarenga',    name:'横浜赤レンガ倉庫', lat:35.4513, lon:139.6400, tags:['赤レンガ','イベント'],
+    desc:'歴史的建造物を活用した商業＆イベント施設。通常入場無料（イベント別途）。', thumb:'https://source.unsplash.com/800x600/?yokohama,red-brick,warehouse',
+    student:{ available:false, url:'https://www.yokohama-akarenga.jp/' } },
+  { id:'minatomirai', name:'みなとみらい21', lat:35.4540, lon:139.6326, tags:['みなとみらい','展望'],
+    desc:'観光名所が点在するウォーターフロント地区。', thumb:'https://source.unsplash.com/800x600/?minatomirai,yokohama,skyline',
+    student:{ available:false } },
+  { id:'yamashita',   name:'山下公園', lat:35.4433, lon:139.6507, tags:['公園','散策'],
+    desc:'港に面した海辺の都市公園（入園無料）。', thumb:'https://source.unsplash.com/800x600/?yokohama,park,sea',
+    student:{ available:false, url:'https://www.yokohamajapan.com/things-to-do/detail.php?bbid=190' } },
+  { id:'cupnoodles',  name:'カップヌードルミュージアム 横浜', lat:35.4564, lon:139.6389, tags:['みなとみらい','博物館','体験'],
+    desc:'インスタントラーメンの歴史と体験が楽しめるミュージアム。', thumb:'https://source.unsplash.com/800x600/?museum,exhibition',
+    student:{ available:true, price:{ student:0, adult:500 }, condition:'高校生以下は入館無料／大人（大学生以上）500円。体験は別料金。', url:'https://www.cupnoodles-museum.jp/en/yokohama/guide/admission/' } },
+  { id:'sankeien',    name:'三溪園', lat:35.4160, lon:139.6530, tags:['三溪園','庭園','文化'],
+    desc:'歴史的建造物と四季の景観が美しい日本庭園。', thumb:'https://source.unsplash.com/800x600/?japanese,garden,temple',
+    student:{ available:true, price:{ student:200, adult:900 }, condition:'小・中学生200円／高校生以上900円', url:'https://www.sankeien.or.jp/price-service/' } },
+  { id:'osanbashi',   name:'大さん橋', lat:35.4519, lon:139.6523, tags:['海','建築','散策'],
+    desc:'屋上広場は24時間開放のビュースポット（無料）。', thumb:'https://source.unsplash.com/800x600/?yokohama,port,pier',
+    student:{ available:false, url:'https://osanbashi.jp/en/rooftop/' } },
+  { id:'marinetower', name:'横浜マリンタワー', lat:35.4437, lon:139.6526, tags:['展望','山下公園'],
+    desc:'横浜の街と港を一望できる展望タワー。', thumb:'https://source.unsplash.com/800x600/?yokohama,tower,city',
+    student:{ available:true, price:{ student:500, adult:1000 }, condition:'平日デイ 小中500円／高校生以上1,000円（時間帯で変動）', url:'https://marinetower.yokohama/price-hours/' } }
 ];
 
+/* ===== 地理ツリー ===== */
 const GEO_TREE = {
   '関東': {
     center:[35.68,139.76], radius:180000, zoom:8,
@@ -246,14 +359,26 @@ const markerPool = new Map();
 let geoScope = { level:null, key:null, center:null, radius:null, zoom:null };
 let geoCircle = null;
 
+/* タグフィルタ */
+const selectedTags = new Set();
+
+/* ====== コメント＆評価（localStorage） ====== */
+const COMMENTS_KEY='yokohama.demo.placeComments.v1';
+function loadAllComments(){ try{ return JSON.parse(localStorage.getItem(COMMENTS_KEY)||'{}'); } catch{ return {}; } }
+function saveAllComments(obj){ localStorage.setItem(COMMENTS_KEY, JSON.stringify(obj)); }
+function getComments(placeId){ const all=loadAllComments(); return Array.isArray(all[placeId])? all[placeId] : []; }
+function setComments(placeId, arr){ const all=loadAllComments(); all[placeId]=arr; saveAllComments(all); }
+function addComment(placeId, c){ const arr=getComments(placeId); arr.push(c); setComments(placeId, arr); }
+function avgRating(placeId){ const arr=getComments(placeId); if(!arr.length) return {avg:0,count:0}; const s=arr.reduce((a,b)=>a+(+b.rating||0),0); return {avg:s/arr.length, count:arr.length}; }
+
+/* ===== 初期化 ===== */
 function initMap(){
-  map = L.map('map', { boxZoom:true }).setView(defaultCenter, defaultZoom); // Shift+ドラッグで矩形
+  map = L.map('map', { boxZoom:true }).setView(defaultCenter, defaultZoom);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OpenStreetMap contributors' }).addTo(map);
 
   cluster = L.markerClusterGroup();
   map.addLayer(cluster);
 
-  // ピン常設
   PLACES.forEach(p=>{
     const m = L.marker([p.lat,p.lon]);
     m.bindPopup(`<strong>${p.name}</strong><br>${p.desc||''}`);
@@ -262,10 +387,9 @@ function initMap(){
   });
   syncMarkers(new Set(PLACES.map(p=>p.id)));
 
-  // タップ/クリック → 円
+  // タップ＝円
   map.on('click', (e)=> placeCircleAt(e.latlng));
-
-  // Shift+ドラッグ → 矩形選択
+  // Shift+ドラッグ＝四角（boxzoom）
   map.on('boxzoomend', (ev)=>{
     if (!ev.boxZoomBounds) return;
     if (selectionLayer){ selectionLayer.remove(); selectionLayer=null; }
@@ -273,7 +397,6 @@ function initMap(){
     selectionLayer = L.rectangle(ev.boxZoomBounds, {color:'#2563eb',weight:2,fillColor:'#2563eb',fillOpacity:.12,interactive:false}).addTo(map);
     applyFilters();
   });
-
   map.on('moveend', ()=>{ if (document.getElementById('boundsOnly').checked) applyFilters(); });
 }
 
@@ -281,8 +404,8 @@ function placeCircleAt(latlng){
   const r = +document.getElementById('radius').value || 600;
   if (selectionLayer) selectionLayer.remove();
   if (centerDot) centerDot.remove();
-  selectionLayer = L.circle(latlng, { radius:r, color:'#10b981', fillColor:'#10b981', fillOpacity:.12, weight:2 }).addTo(map);
-  centerDot = L.circleMarker(latlng, { radius:5, color:'#065f46', fillColor:'#10b981', fillOpacity:1, weight:2 }).addTo(map);
+  selectionLayer = L.circle(latlng, { radius:r, color:'#3b82f6', fillColor:'#3b82f6', fillOpacity:.12, weight:2 }).addTo(map);
+  centerDot = L.circleMarker(latlng, { radius:5, color:'#1d4ed8', fillColor:'#60a5fa', fillOpacity:1, weight:2 }).addTo(map);
   applyFilters();
 }
 
@@ -342,7 +465,7 @@ function setGeoScopeByUI(){
 function drawGeoCircle(){
   if (geoCircle){ geoCircle.remove(); geoCircle=null; }
   if (geoScope.center && geoScope.radius){
-    geoCircle = L.circle(geoScope.center, { radius:geoScope.radius, color:'#6366f1', weight:2, dashArray:'6 6', fillColor:'#6366f1', fillOpacity:.06 }).addTo(map);
+    geoCircle = L.circle(geoScope.center, { radius:geoScope.radius, color:'#3b82f6', weight:2, dashArray:'6 6', fillColor:'#3b82f6', fillOpacity:.06 }).addTo(map);
     map.setView(geoScope.center, geoScope.zoom || map.getZoom());
   }
 }
@@ -357,7 +480,7 @@ regionSelect.addEventListener('change', ()=>{ populatePrefs(regionSelect.value);
 prefSelect.addEventListener('change',  ()=>{ populateCities(regionSelect.value, prefSelect.value); setGeoScopeByUI(); });
 citySelect.addEventListener('change',  ()=> setGeoScopeByUI());
 
-/* ===== 円UI（スライダー/プリセット/現在地中心） ===== */
+/* ===== 円UI ===== */
 const radiusInput=document.getElementById('radius'), radiusVal=document.getElementById('radiusVal');
 radiusInput.addEventListener('input', ()=>{
   radiusVal.textContent=`${radiusInput.value}m`;
@@ -374,6 +497,36 @@ document.getElementById('centerHere').addEventListener('click', ()=>{
 radiusInput.addEventListener('touchstart', ()=> map.dragging.disable());
 radiusInput.addEventListener('touchend',   ()=> map.dragging.enable());
 
+/* ===== タグバー ===== */
+function uniqueTagsFromPlaces(){
+  const s = new Set();
+  PLACES.forEach(p => (p.tags||[]).forEach(t => s.add(t)));
+  return Array.from(s).sort((a,b)=> a.localeCompare(b,'ja'));
+}
+function buildTagBar(){
+  const box = document.getElementById('tagBar');
+  if (!box) return;
+  box.innerHTML = '';
+  uniqueTagsFromPlaces().forEach(tag=>{
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tagchip';
+    btn.textContent = `# ${tag}`;
+    btn.dataset.tag = tag;
+    btn.addEventListener('click', ()=>{
+      if (selectedTags.has(tag)) selectedTags.delete(tag); else selectedTags.add(tag);
+      btn.classList.toggle('active', selectedTags.has(tag));
+      applyFilters();
+    });
+    box.appendChild(btn);
+  });
+}
+document.getElementById('clearTags')?.addEventListener('click', ()=>{
+  selectedTags.clear();
+  document.querySelectorAll('#tagBar .tagchip').forEach(b=> b.classList.remove('active'));
+  applyFilters();
+});
+
 /* ===== 絞り込み ===== */
 function inSelection(lat,lon){
   if (!selectionLayer) return true;
@@ -388,11 +541,14 @@ function inGeoScope(lat,lon){
 }
 function filterPlaces(query, opts){
   const ts=tokens(query); let arr=PLACES.slice();
-
-  // 地理（地方→都道府県→市）→ 選択図形（円/□）→ 表示範囲 → テキスト → 学割 → 距離順
+  // 地域→円/四角→表示範囲→タグ→テキスト→学割→距離順
   arr = arr.filter(p=> inGeoScope(p.lat,p.lon));
   arr = arr.filter(p=> inSelection(p.lat,p.lon));
   if (opts.boundsOnly){ const b=map.getBounds(); arr=arr.filter(p=>b.contains([p.lat,p.lon])); }
+
+  if (selectedTags.size){ // ORマッチ
+    arr = arr.filter(p => (p.tags||[]).some(t => selectedTags.has(t)));
+  }
   if (ts.length){
     arr=arr.filter(p=>{
       const hay=(p.name+'\u0000'+(p.tags||[]).join('\u0000')).toLowerCase();
@@ -407,35 +563,46 @@ function filterPlaces(query, opts){
   return arr;
 }
 
-/* ===== リスト＆ピン同期 ===== */
+/* ===== リスト＆ピン同期（カード版） ===== */
+function cardImage(p){
+  const src = p.thumb || 'https://source.unsplash.com/800x600/?travel,city';
+  return `<img src="${src}" alt="${p.name}" onerror="this.style.display='none'">`;
+}
 function render(list){
   const listEl=document.getElementById('list'); listEl.innerHTML='';
   document.getElementById('resultCount').textContent=`— ${fmt(list.length)}件`;
-
   if(!list.length){ listEl.innerHTML='<p class="muted" style="margin:8px">該当スポットが見つかりませんでした。</p>'; }
 
   list.forEach(p=>{
-    const st=p.student, price=st?.available?`<span class="price">学生 ${yen(st.price?.student)}${st.price?.adult!=null?`／一般 ${yen(st.price.adult)}`:''}</span>`:'';
-    const item=document.createElement('div');
-    item.className='item'; item.dataset.id=p.id;
-    item.innerHTML=`
-      <h3>${p.name}${st?.available?' <span class="tag">学割</span>':''}</h3>
-      <p class="muted">${p.desc||''}</p>
-      <div class="row">${(p.tags||[]).map(t=>`<span class="tag">${t}</span>`).join(' ')}</div>
-      ${st?.available?`<div class="row">${price} <small class="muted">${st.condition||''}</small></div>`:''}
-      <div class="row">
-        <button type="button" class="btn" data-action="map">地図で見る</button>
-        <button type="button" class="btn" data-action="detail">詳細（口コミ/★）</button>
-        <a class="btn" href="${osmLink(p.lat,p.lon)}" target="_blank" rel="noopener">OSMで開く</a>
-        ${p._d!=null?`<small class="muted">／ 約 ${fmt1(p._d)} km</small>`:''}
+    const st=p.student; const ri=avgRating(p.id);
+    const price=st?.available?`<span class="tag">学生 ${yen(st.price?.student)}${st.price?.adult!=null?`／一般 ${yen(st.price.adult)}`:''}</span>`:'';
+
+    const card=document.createElement('div');
+    card.className='card'; card.dataset.id=p.id;
+    card.innerHTML=`
+      <a class="card-hero" href="javascript:void(0)" data-action="detail">
+        ${cardImage(p)}
+        ${st?.available?'<span class="badge">学割</span>':''}
+        <span class="rating">${starHTML(ri.avg)} <span>${ri.count?ri.avg.toFixed(1):'—'}</span></span>
+      </a>
+      <div class="card-body">
+        <h3>${p.name}</h3>
+        <p class="muted" style="margin:.2em 0 .4em">${p.desc||''}</p>
+        <div class="row">${(p.tags||[]).map(t=>`<span class="tag">${t}</span>`).join(' ')} ${price||''}</div>
+        <div class="row" style="margin-top:6px">
+          <button type="button" class="btn primary" data-action="detail">詳細（口コミ/★）</button>
+          <button type="button" class="btn" data-action="map">地図で見る</button>
+          <a class="btn" href="${osmLink(p.lat,p.lon)}" target="_blank" rel="noopener">OSMで開く</a>
+          ${p._d!=null?`<small class="muted">／ 約 ${fmt1(p._d)} km</small>`:''}
+        </div>
       </div>`;
-    item.querySelector('[data-action="map"]').addEventListener('click', ()=>{
+    card.querySelectorAll('[data-action="map"]').forEach(b=> b.addEventListener('click', ()=>{
       map.setView([p.lat,p.lon],16);
       const mk=markerPool.get(p.id); if (mk){ mk.openPopup(); }
       selectedId=p.id; highlightSelected();
-    });
-    item.querySelector('[data-action="detail"]').addEventListener('click', ()=> openPanelFor(p));
-    listEl.appendChild(item);
+    }));
+    card.querySelectorAll('[data-action="detail"]').forEach(b=> b.addEventListener('click', ()=> openPanelFor(p)));
+    listEl.appendChild(card);
   });
 
   const keep = new Set(list.map(p=>p.id));
@@ -446,7 +613,7 @@ function render(list){
              : (geoScope.level ? `地域：${geoScope.key}（${geoScope.level}）` : '選択範囲：なし（地図をタップ / Shift+ドラッグ）');
   document.getElementById('stat').textContent = stat;
 }
-function highlightSelected(){ document.querySelectorAll('.item').forEach(el=> el.classList.toggle('selected', el.dataset.id===selectedId)); }
+function highlightSelected(){ document.querySelectorAll('.card').forEach(el=> el.classList.toggle('selected', el.dataset.id===selectedId)); }
 
 /* ===== 適用／現在地 ===== */
 function applyFilters(){
@@ -458,7 +625,6 @@ function applyFilters(){
   });
   render(list);
 }
-
 function locate(){
   if(!navigator.geolocation){ showToast('現在地が使えません'); return; }
   navigator.geolocation.getCurrentPosition(pos=>{
@@ -470,34 +636,26 @@ function locate(){
   }, err=> showToast('位置エラー: '+err.message), {enableHighAccuracy:true, timeout:7000, maximumAge:60000});
 }
 
-/* ======== 場所別 コメント & 星評価（localStorage） ======== */
-const COMMENTS_KEY='yokohama.demo.placeComments.v1';
-function loadAllComments(){ try{ return JSON.parse(localStorage.getItem(COMMENTS_KEY)||'{}'); } catch{ return {}; } }
-function saveAllComments(obj){ localStorage.setItem(COMMENTS_KEY, JSON.stringify(obj)); }
-function getComments(placeId){ const all=loadAllComments(); return Array.isArray(all[placeId])? all[placeId] : []; }
-function setComments(placeId, arr){ const all=loadAllComments(); all[placeId]=arr; saveAllComments(all); }
-function addComment(placeId, c){ const arr=getComments(placeId); arr.push(c); setComments(placeId, arr); }
-function avgRating(placeId){ const arr=getComments(placeId); if(!arr.length) return {avg:0,count:0}; const s=arr.reduce((a,b)=>a+(+b.rating||0),0); return {avg:s/arr.length, count:arr.length}; }
-
-/* スライド詳細パネル */
+/* ===== スライドパネル（詳細・口コミ） ===== */
 const slidePanel = document.getElementById('slidePanel');
 const panelTitle = document.getElementById('panelTitle');
 const panelContent = document.getElementById('panelContent');
 const panelLink = document.getElementById('panelLink');
-document.getElementById('closePanel').addEventListener('click', ()=> slidePanel.classList.remove('is-active'));
+document.getElementById('closePanel').addEventListener('click', ()=>{
+  slidePanel.classList.remove('is-active');
+  document.body.style.overflow = ''; // 背面スクロール再開
+});
 
+function starHTMLInline(n){ return starHTML(n).replaceAll('class="stars"','class="stars" style="transform:translateY(2px)"'); }
 function openPanelFor(p){
   selectedId = p.id;
   const ratingInfo = avgRating(p.id);
   panelTitle.textContent = p.name;
-
   panelContent.innerHTML = `
     <div class="comment-block">
-      <div class="rating-summary">
-        <div>${starHTML(ratingInfo.avg)} <span class="muted-on-dark"> ${ratingInfo.count? ratingInfo.avg.toFixed(1) : '—'} / 5 ・ ${ratingInfo.count}件</span></div>
-      </div>
+      <div>${starHTMLInline(ratingInfo.avg)} <span class="muted-on-dark"> ${ratingInfo.count? ratingInfo.avg.toFixed(1) : '—'} / 5 ・ ${ratingInfo.count}件</span></div>
       <p class="muted-on-dark" style="margin:.4em 0 0">${p.desc||''}</p>
-      <p>${(p.tags||[]).map(t=>`<span class="tag" style="background:#374151;color:#e5e7eb">${t}</span>`).join(' ')}</p>
+      <p>${(p.tags||[]).map(t=>`<span class="tag" style="background:#0b1220;color:#e5e7eb;border:1px solid #374151">${t}</span>`).join(' ')}</p>
       ${p.student?.available ? `<p class="muted-on-dark"><strong>学割:</strong> 学生 ${yen(p.student.price?.student)}${p.student.price?.adult!=null?`／一般 ${yen(p.student.price.adult)}`:''}<br><small>${p.student.condition||''}</small></p>` : '<p class="muted-on-dark"><small>学割情報なし</small></p>'}
       <p><a class="link-on-dark" href="${osmLink(p.lat,p.lon)}" target="_blank" rel="noopener">OpenStreetMapで開く</a></p>
     </div>
@@ -525,8 +683,6 @@ function openPanelFor(p){
       <div id="panelCommentList"></div>
     </div>
   `;
-
-  // 入力スターの挙動
   const ratingInput = document.getElementById('ratingInput');
   const ratingValue = document.getElementById('ratingValue');
   ratingInput.querySelectorAll('.star-btn').forEach(btn=>{
@@ -536,8 +692,6 @@ function openPanelFor(p){
       ratingInput.querySelectorAll('.star-btn').forEach(b=> b.classList.toggle('active', +b.dataset.v <= v));
     });
   });
-
-  // 投稿処理
   document.getElementById('panelCommentForm').addEventListener('submit', (e)=>{
     e.preventDefault();
     const name = document.getElementById('cName').value.trim();
@@ -550,19 +704,18 @@ function openPanelFor(p){
     document.getElementById('cName').value = '';
     ratingValue.value = 0;
     ratingInput.querySelectorAll('.star-btn').forEach(b=> b.classList.remove('active'));
-    renderPanelComments(p.id); // 再描画
-    // ヘッダーの平均も更新
+    renderPanelComments(p.id);
     const ri = avgRating(p.id);
-    panelContent.querySelector('.rating-summary').innerHTML = `${starHTML(ri.avg)} <span class="muted-on-dark"> ${ri.avg.toFixed(1)} / 5 ・ ${ri.count}件</span>`;
+    panelContent.querySelector('.comment-block div').innerHTML =
+      `${starHTMLInline(ri.avg)} <span class="muted-on-dark"> ${ri.avg.toFixed(1)} / 5 ・ ${ri.count}件</span>`;
+    applyFilters(); // カード側の表示更新
   });
-
   renderPanelComments(p.id);
-
   panelLink.href = p.student?.url || osmLink(p.lat,p.lon);
   panelLink.textContent = p.student?.url ? '学割/公式ページへ' : 'OSMで開く';
   slidePanel.classList.add('is-active');
+  document.body.style.overflow = 'hidden'; // 背面スクロール抑止
 }
-
 function renderPanelComments(placeId){
   const listEl = document.getElementById('panelCommentList');
   const arr = getComments(placeId);
@@ -582,7 +735,7 @@ function renderPanelComments(placeId){
 }
 
 /* ===== 起動・イベント ===== */
-initMap(); render(PLACES);
+initMap(); buildTagBar(); render(PLACES);
 
 document.getElementById('searchForm').addEventListener('submit', e=>{ e.preventDefault(); applyFilters(); });
 document.getElementById('q').addEventListener('input', ()=> applyFilters());
@@ -593,7 +746,6 @@ document.getElementById('sortByDistance').addEventListener('change', ()=>{
   applyFilters();
 });
 document.getElementById('locateBtn').addEventListener('click', locate);
-
 document.getElementById('resetBtn').addEventListener('click', ()=>{
   document.getElementById('q').value='';
   ['onlyDiscount','boundsOnly','sortByDistance'].forEach(id=>document.getElementById(id).checked=false);
@@ -605,9 +757,9 @@ document.getElementById('resetBtn').addEventListener('click', ()=>{
   citySelect.innerHTML='<option value="">市区町村（まず都道府県を選択）</option>'; citySelect.disabled=true;
   selectedId=null; currentLoc=null; document.getElementById('geoStatus').textContent='';
   map.setView(defaultCenter, defaultZoom);
+  selectedTags.clear(); document.querySelectorAll('#tagBar .tagchip').forEach(b=> b.classList.remove('active'));
   render(PLACES);
 });
-
 document.getElementById('chips').addEventListener('click', e=>{
   const b=e.target.closest('[data-city]'); if(!b) return;
   regionSelect.value='関東'; populatePrefs('関東');
@@ -619,3 +771,4 @@ document.getElementById('chips').addEventListener('click', e=>{
 </script>
 </body>
 </html>
+
