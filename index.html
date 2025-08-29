@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>地方→都道府県→市 + タップで円 / Shift+ドラッグで四角（OSM・API不要）</title>
+<title>地方→都道府県→市 + タップで円 / Shift+ドラッグで四角（OSM・場所別コメント/星評価）</title>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
@@ -19,7 +19,7 @@
   header h1{ margin:0; font-size:clamp(18px,2vw+12px,28px) }
   .btn-login{ padding:10px 14px; border-radius:999px; background:#111827; color:#fff; text-decoration:none; font-weight:600 }
 
-  .layout{ display:grid; gap:var(--gap); grid-template-columns:1fr } 
+  .layout{ display:grid; gap:var(--gap); grid-template-columns:1fr }
   @media(min-width:900px){ .layout{ grid-template-columns:360px 1fr } }
 
   .panel{ border:1px solid var(--border); border-radius:var(--radius); background:#fff; overflow:clip; box-shadow:0 10px 24px #00000010 }
@@ -63,25 +63,39 @@
   .toast{ position:fixed; left:50%; transform:translateX(-50%); bottom:16px; background:#111827; color:#fff; padding:10px 14px; border-radius:12px; font-size:14px; opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:9999 }
   .toast.show{ opacity:1; transform:translateX(-50%) translateY(-4px) }
 
-  /* 下からスライドの詳細パネル */
-  .panel-detail{ position:fixed; left:0; right:0; bottom:0; height:min(70vh,520px); background:#1f2937; color:#fff; border-radius:16px 16px 0 0; box-shadow:0 -10px 30px #0005; transform:translateY(100%); transition:transform .28s ease; z-index:10000; display:grid; grid-template-rows:auto 1fr auto; gap:12px; padding:16px }
+  /* 下からスライドの詳細パネル（場所別コメント/星評価込み） */
+  .panel-detail{ position:fixed; left:0; right:0; bottom:0; height:min(75vh,560px); background:#1f2937; color:#fff; border-radius:16px 16px 0 0; box-shadow:0 -10px 30px #0005; transform:translateY(100%); transition:transform .28s ease; z-index:10000; display:grid; grid-template-rows:auto 1fr auto; gap:12px; padding:16px }
   .panel-detail.is-active{ transform:translateY(0) }
   .panel-detail h3{ margin:0 }
-  .panel-detail .content{ overflow:auto }
+  .panel-detail .content{ overflow:auto; display:grid; gap:12px }
   .panel-detail .actions{ display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end }
   .closeBtn{ background:#111827; color:#fff; border:1px solid #374151; border-radius:10px; padding:8px 12px; cursor:pointer }
 
-  /* コメント欄 */
-  .comments{ padding:12px; display:grid; gap:10px }
+  /* 星表示＆入力 */
+  .rating-summary{ display:flex; align-items:center; gap:8px; flex-wrap:wrap }
+  .stars{ display:inline-flex; gap:2px; user-select:none }
+  .star{ font-size:20px; line-height:1; color:#d1d5db }
+  .star.filled{ color:#f59e0b } /* amber-500 */
+
+  .rating-input{ display:flex; align-items:center; gap:6px }
+  .star-btn{ font-size:24px; line-height:1; background:none; border:none; cursor:pointer; color:#d1d5db; padding:4px }
+  .star-btn.active, .star-btn:hover, .star-btn:focus{ color:#f59e0b; outline:none }
+
+  /* コメント表示/投稿 */
+  .comment-block{ background:#111827; border:1px solid #374151; border-radius:12px; padding:12px }
+  .comment-line{ background:#111827; border:1px solid #374151; border-radius:12px; padding:10px 12px }
+  .comment-line + .comment-line{ margin-top:8px }
+  .comment-line small{ color:#9ca3af }
   .comment-form{ display:grid; gap:8px }
-  .comment-form input,.comment-form textarea{ padding:10px 12px; border:1px solid var(--border); border-radius:10px; font-size:14px }
-  .comment{ border:1px solid var(--border); border-radius:12px; padding:10px 12px; background:#fff }
-  .comment small{ color:var(--muted) }
+  .comment-form input,.comment-form textarea{ padding:10px 12px; border:1px solid #374151; border-radius:10px; font-size:14px; background:#0b1220; color:#fff }
+  .comment-form button{ background:#2563eb; color:#fff; border:1px solid #2563eb; border-radius:10px; padding:10px 12px; cursor:pointer }
+  .muted-on-dark{ color:#9ca3af }
+  a.link-on-dark{ color:#93c5fd }
 </style>
 </head>
 <body>
 <header>
-  <h1>地方⇒都道府県⇒市（OSM）</h1>
+  <h1>地方⇒都道府県⇒市（OSM・場所別コメント/星評価）</h1>
   <a class="btn-login" href="https://lagrangero-group4.web.app/?v=2" target="_blank" rel="noopener">ログイン</a>
 </header>
 
@@ -155,24 +169,11 @@
       </div>
     </div>
   </section>
-
-  <!-- コメント欄 -->
-  <section class="panel" style="margin-top:14px">
-    <h2>コメント</h2>
-    <div class="comments">
-      <form id="commentForm" class="comment-form">
-        <input id="cName" type="text" placeholder="お名前（任意）">
-        <textarea id="cText" rows="3" placeholder="コメントを書く…"></textarea>
-        <button class="btn" type="submit">投稿</button>
-      </form>
-      <div id="commentList"></div>
-    </div>
-  </section>
 </main>
 
 <footer>© 2025 Demo · タイル: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></footer>
 
-<!-- スライド詳細パネル -->
+<!-- スライド詳細パネル（場所別コメント/星評価） -->
 <div id="slidePanel" class="panel-detail" aria-live="polite">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
     <h3 id="panelTitle">詳細</h3>
@@ -234,6 +235,7 @@ const tokens=q => norm(q).split(/\s+/).filter(Boolean);
 const osmLink = (lat, lon, z=16)=>`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=${z}/${lat}/${lon}`;
 const R=6371; const haversineKm=(a,b)=>{const r=x=>x*Math.PI/180;const dLat=r(b[0]-a[0]),dLon=r(b[1]-a[1]),la1=r(a[0]),la2=r(b[0]);const h=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(h));};
 const showToast=m=>{const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1500);};
+const starHTML=(n,max=5)=>{ n=Math.max(0,Math.min(max,Math.round(n))); return '<span class="stars">'+Array.from({length:max},(_,i)=>`<span class="star ${i<n?'filled':''}">★</span>`).join('')+'</span>'; };
 
 /* ===== 地図・マーカー ===== */
 let map, cluster, selectionLayer=null, centerDot=null, currentLoc=null, selectedId=null;
@@ -263,7 +265,7 @@ function initMap(){
   // タップ/クリック → 円
   map.on('click', (e)=> placeCircleAt(e.latlng));
 
-  // Shift+ドラッグ → Leafletのboxzoomで矩形選択
+  // Shift+ドラッグ → 矩形選択
   map.on('boxzoomend', (ev)=>{
     if (!ev.boxZoomBounds) return;
     if (selectionLayer){ selectionLayer.remove(); selectionLayer=null; }
@@ -423,7 +425,7 @@ function render(list){
       ${st?.available?`<div class="row">${price} <small class="muted">${st.condition||''}</small></div>`:''}
       <div class="row">
         <button type="button" class="btn" data-action="map">地図で見る</button>
-        <button type="button" class="btn" data-action="detail">詳細</button>
+        <button type="button" class="btn" data-action="detail">詳細（口コミ/★）</button>
         <a class="btn" href="${osmLink(p.lat,p.lon)}" target="_blank" rel="noopener">OSMで開く</a>
         ${p._d!=null?`<small class="muted">／ 約 ${fmt1(p._d)} km</small>`:''}
       </div>`;
@@ -468,50 +470,119 @@ function locate(){
   }, err=> showToast('位置エラー: '+err.message), {enableHighAccuracy:true, timeout:7000, maximumAge:60000});
 }
 
-/* ===== スライドパネル（詳細） ===== */
+/* ======== 場所別 コメント & 星評価（localStorage） ======== */
+const COMMENTS_KEY='yokohama.demo.placeComments.v1';
+function loadAllComments(){ try{ return JSON.parse(localStorage.getItem(COMMENTS_KEY)||'{}'); } catch{ return {}; } }
+function saveAllComments(obj){ localStorage.setItem(COMMENTS_KEY, JSON.stringify(obj)); }
+function getComments(placeId){ const all=loadAllComments(); return Array.isArray(all[placeId])? all[placeId] : []; }
+function setComments(placeId, arr){ const all=loadAllComments(); all[placeId]=arr; saveAllComments(all); }
+function addComment(placeId, c){ const arr=getComments(placeId); arr.push(c); setComments(placeId, arr); }
+function avgRating(placeId){ const arr=getComments(placeId); if(!arr.length) return {avg:0,count:0}; const s=arr.reduce((a,b)=>a+(+b.rating||0),0); return {avg:s/arr.length, count:arr.length}; }
+
+/* スライド詳細パネル */
 const slidePanel = document.getElementById('slidePanel');
 const panelTitle = document.getElementById('panelTitle');
 const panelContent = document.getElementById('panelContent');
 const panelLink = document.getElementById('panelLink');
 document.getElementById('closePanel').addEventListener('click', ()=> slidePanel.classList.remove('is-active'));
+
 function openPanelFor(p){
+  selectedId = p.id;
+  const ratingInfo = avgRating(p.id);
   panelTitle.textContent = p.name;
+
   panelContent.innerHTML = `
-    <p>${p.desc||''}</p>
-    <p>${(p.tags||[]).map(t=>`<span class="tag" style="background:#374151;color:#e5e7eb">${t}</span>`).join(' ')}</p>
-    ${p.student?.available ? `<p><strong>学割:</strong> 学生 ${yen(p.student.price?.student)}${p.student.price?.adult!=null?`／一般 ${yen(p.student.price.adult)}`:''}<br><small>${p.student.condition||''}</small></p>` : '<p><small>学割情報はありません</small></p>'}
-    <p><a href="${osmLink(p.lat,p.lon)}" target="_blank" rel="noopener" style="color:#93c5fd">OpenStreetMapで開く</a></p>
+    <div class="comment-block">
+      <div class="rating-summary">
+        <div>${starHTML(ratingInfo.avg)} <span class="muted-on-dark"> ${ratingInfo.count? ratingInfo.avg.toFixed(1) : '—'} / 5 ・ ${ratingInfo.count}件</span></div>
+      </div>
+      <p class="muted-on-dark" style="margin:.4em 0 0">${p.desc||''}</p>
+      <p>${(p.tags||[]).map(t=>`<span class="tag" style="background:#374151;color:#e5e7eb">${t}</span>`).join(' ')}</p>
+      ${p.student?.available ? `<p class="muted-on-dark"><strong>学割:</strong> 学生 ${yen(p.student.price?.student)}${p.student.price?.adult!=null?`／一般 ${yen(p.student.price.adult)}`:''}<br><small>${p.student.condition||''}</small></p>` : '<p class="muted-on-dark"><small>学割情報なし</small></p>'}
+      <p><a class="link-on-dark" href="${osmLink(p.lat,p.lon)}" target="_blank" rel="noopener">OpenStreetMapで開く</a></p>
+    </div>
+
+    <div>
+      <h4 style="margin:6px 0">口コミを投稿</h4>
+      <form id="panelCommentForm" class="comment-form">
+        <div class="rating-input" id="ratingInput" aria-label="星評価（1〜5）">
+          <button type="button" class="star-btn" data-v="1">★</button>
+          <button type="button" class="star-btn" data-v="2">★</button>
+          <button type="button" class="star-btn" data-v="3">★</button>
+          <button type="button" class="star-btn" data-v="4">★</button>
+          <button type="button" class="star-btn" data-v="5">★</button>
+          <span class="muted-on-dark">（タップで選択）</span>
+          <input type="hidden" id="ratingValue" value="0">
+        </div>
+        <input id="cName" type="text" placeholder="お名前（任意）">
+        <textarea id="cText" rows="3" placeholder="コメントを書く…"></textarea>
+        <button type="submit">投稿</button>
+      </form>
+    </div>
+
+    <div>
+      <h4 style="margin:6px 0">みんなの口コミ</h4>
+      <div id="panelCommentList"></div>
+    </div>
   `;
+
+  // 入力スターの挙動
+  const ratingInput = document.getElementById('ratingInput');
+  const ratingValue = document.getElementById('ratingValue');
+  ratingInput.querySelectorAll('.star-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const v = +btn.dataset.v;
+      ratingValue.value = v;
+      ratingInput.querySelectorAll('.star-btn').forEach(b=> b.classList.toggle('active', +b.dataset.v <= v));
+    });
+  });
+
+  // 投稿処理
+  document.getElementById('panelCommentForm').addEventListener('submit', (e)=>{
+    e.preventDefault();
+    const name = document.getElementById('cName').value.trim();
+    const text = document.getElementById('cText').value.trim();
+    const rating = +document.getElementById('ratingValue').value || 0;
+    if (!text){ showToast('コメントを入力してください'); return; }
+    if (!(rating>=1 && rating<=5)){ showToast('星の数を選択してください（1〜5）'); return; }
+    addComment(p.id, { name, text, rating, ts: Date.now() });
+    document.getElementById('cText').value = '';
+    document.getElementById('cName').value = '';
+    ratingValue.value = 0;
+    ratingInput.querySelectorAll('.star-btn').forEach(b=> b.classList.remove('active'));
+    renderPanelComments(p.id); // 再描画
+    // ヘッダーの平均も更新
+    const ri = avgRating(p.id);
+    panelContent.querySelector('.rating-summary').innerHTML = `${starHTML(ri.avg)} <span class="muted-on-dark"> ${ri.avg.toFixed(1)} / 5 ・ ${ri.count}件</span>`;
+  });
+
+  renderPanelComments(p.id);
+
   panelLink.href = p.student?.url || osmLink(p.lat,p.lon);
   panelLink.textContent = p.student?.url ? '学割/公式ページへ' : 'OSMで開く';
   slidePanel.classList.add('is-active');
 }
 
-/* ===== コメント（ローカル保存） ===== */
-const keyComments='yokohama.demo.comments';
-function loadComments(){ try{return JSON.parse(localStorage.getItem(keyComments)||'[]')}catch{return[]} }
-function saveComments(list){ localStorage.setItem(keyComments, JSON.stringify(list)); }
-function renderComments(){
-  const box=document.getElementById('commentList'); box.innerHTML='';
-  const list=loadComments();
-  list.slice().reverse().forEach(c=>{
-    const el=document.createElement('div');
-    el.className='comment';
-    el.innerHTML=`<strong>${c.name||'名無しさん'}</strong> <small>${new Date(c.ts).toLocaleString()}</small><p style="margin:.4em 0 0">${c.text}</p>`;
-    box.appendChild(el);
-  });
+function renderPanelComments(placeId){
+  const listEl = document.getElementById('panelCommentList');
+  const arr = getComments(placeId);
+  if (!arr.length){
+    listEl.innerHTML = `<p class="muted-on-dark" style="margin:6px 0">口コミはまだありません。最初のレビューを書きませんか？</p>`;
+    return;
+  }
+  listEl.innerHTML = arr.slice().reverse().map(c=>{
+    const when = new Date(c.ts).toLocaleString();
+    return `
+      <div class="comment-line">
+        <div>${starHTML(c.rating)}</div>
+        <div style="margin:.2em 0 .2em">${c.text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+        <small>${c.name||'名無しさん'} ・ ${when}</small>
+      </div>`;
+  }).join('');
 }
-document.getElementById('commentForm').addEventListener('submit', e=>{
-  e.preventDefault();
-  const name=document.getElementById('cName').value.trim();
-  const text=document.getElementById('cText').value.trim();
-  if(!text) return;
-  const list=loadComments(); list.push({name,text,ts:Date.now()}); saveComments(list);
-  document.getElementById('cText').value=''; renderComments();
-});
 
 /* ===== 起動・イベント ===== */
-initMap(); render(PLACES); renderComments();
+initMap(); render(PLACES);
 
 document.getElementById('searchForm').addEventListener('submit', e=>{ e.preventDefault(); applyFilters(); });
 document.getElementById('q').addEventListener('input', ()=> applyFilters());
