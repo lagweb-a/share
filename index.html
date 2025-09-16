@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Lagrangelo web開発チーム — 観光スポット検索デモ（OSM・カードUI・口コミ）</title>
+<title>Lagrangelo web開発チーム — 観光スポット検索デモ（OSM＋カードUI＋口コミ＋お気に入り）</title>
 
 <!-- Fonts（柔らかい丸ゴ） -->
 <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap" rel="stylesheet">
@@ -61,14 +61,7 @@
         <button id="clearGeo" class="btn ghost" type="button">× 地域クリア</button>
       </div>
 
-      <div class="chips" id="chips">
-        <button class="chip" data-city="横浜市" data-query="中華街"># 中華街</button>
-        <button class="chip" data-city="横浜市" data-query="みなとみらい"># みなとみらい</button>
-        <button class="chip" data-city="横浜市" data-query="山下公園"># 山下公園</button>
-        <button class="chip" data-city="横浜市" data-query="赤レンガ"># 赤レンガ倉庫</button>
-        <button class="chip" data-city="横浜市" data-query="三溪園"># 三溪園</button>
-      </div>
-
+      
       <!-- タグフィルタ（自動生成） -->
       <div class="tagbar" id="tagBar" aria-label="タグで絞り込み"></div>
       <div style="text-align:center; margin:-4px 0 4px;">
@@ -76,13 +69,15 @@
       </div>
     </div>
 
-    <div class="filters">
+    <label><input type="checkbox" id="onlyFavs"> お気に入りのみ</label>
+      
       <label><input type="checkbox" id="onlyDiscount"> 学割ありのみ</label>
       <label><input type="checkbox" id="boundsOnly"> 表示範囲だけ</label>
       <label><input type="checkbox" id="sortByDistance"> 距離順（現在地）</label>
       <button id="locateBtn" class="btn" type="button">◎ 現在地</button>
       <button id="resetBtn" class="btn" type="button">↺ リセット</button>
       <small id="geoStatus" class="muted"></small>
+    <small id="favCounter" class="muted"></small>
     </div>
   </div>
 </div>
@@ -123,11 +118,14 @@
 <div id="slidePanel" class="panel-detail" aria-live="polite">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
     <h3 id="panelTitle" style="margin:0">詳細</h3>
-    <button id="closePanel" class="closeBtn" type="button">閉じる</button>
+     <div style="display:flex;gap:8px;align-items:center">
+      <button id="favInPanel" class="btn fav-btn" type="button">♡ お気に入り</button>
+      <button id="closePanel" class="closeBtn" type="button">閉じる</button>
+    </div>
   </div>
   <div id="panelContent" class="content"></div>
   <div class="actions">
-    <a id="panelLink" class="btn primary" target="_blank" rel="noopener" href="#">関連リンクを開く</a>
+    <a id="panelLink" class="btn primary" target="_blank" rel="noopener" href="#">公式/学割ページへ</a>
   </div>
 </div>
 
@@ -139,4 +137,3 @@
 <script src="script.js"></script>
 </body>
 </html>
-
