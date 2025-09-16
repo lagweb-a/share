@@ -1,7 +1,6 @@
-
-/* ===== データ（横浜サンプル）===== */
+/* ===== データ（横浜サンプル） ===== */
 const PLACES = [
-  { id:'chinatown',   name:'横浜中華街', lat:35.4437, lon:139.6380, tags:['エリア','グルメ','観光'],
+  { id:'chinatown',   name:'横浜中華街', lat:35.4437, lon:139.6380, tags:['グルメ','観光','エリア'],
     desc:'約600店が集まる日本最大級のチャイナタウン。', thumb:'https://source.unsplash.com/800x600/?yokohama,chinatown,lantern',
     student:{ available:false, url:'https://www.chinatown.or.jp/' } },
   { id:'akarenga',    name:'横浜赤レンガ倉庫', lat:35.4513, lon:139.6400, tags:['建築','イベント','ショッピング'],
@@ -13,10 +12,10 @@ const PLACES = [
   { id:'yamashita',   name:'山下公園', lat:35.4433, lon:139.6507, tags:['公園','海','散策'],
     desc:'港に面した海辺の都市公園（入園無料）。', thumb:'https://source.unsplash.com/800x600/?yokohama,park,sea',
     student:{ available:false, url:'https://www.yokohamajapan.com/things-to-do/detail.php?bbid=190' } },
-  { id:'cupnoodles',  name:'カップヌードルミュージアム 横浜', lat:35.4564, lon:139.6389, tags:['屋内','博物館','体験'],
+  { id:'cupnoodles',  name:'カップヌードルミュージアム 横浜', lat:35.4564, lon:139.6389, tags:['博物館','体験','屋内'],
     desc:'インスタントラーメンの歴史と体験が楽しめるミュージアム。', thumb:'https://source.unsplash.com/800x600/?museum,exhibition',
     student:{ available:true, price:{ student:0, adult:500 }, condition:'高校生以下は入館無料／大人（大学生以上）500円。体験は別料金。', url:'https://www.cupnoodles-museum.jp/en/yokohama/guide/admission/' } },
-  { id:'sankeien',    name:'三溪園', lat:35.4160, lon:139.6530, tags:['自然','庭園','文化'],
+  { id:'sankeien',    name:'三溪園', lat:35.4160, lon:139.6530, tags:['庭園','文化','自然'],
     desc:'歴史的建造物と四季の景観が美しい日本庭園。', thumb:'https://source.unsplash.com/800x600/?japanese,garden,temple',
     student:{ available:true, price:{ student:200, adult:900 }, condition:'小・中学生200円／高校生以上900円', url:'https://www.sankeien.or.jp/price-service/' } },
   { id:'osanbashi',   name:'大さん橋', lat:35.4519, lon:139.6523, tags:['海','建築','景観'],
@@ -27,7 +26,7 @@ const PLACES = [
     student:{ available:true, price:{ student:500, adult:1000 }, condition:'平日デイ 小中500円／高校生以上1,000円（時間帯で変動）', url:'https://marinetower.yokohama/price-hours/' } }
 ];
 
-/* ===== 地理ツリー ===== */
+/* ===== 地理ツリー（今後拡張可） ===== */
 const GEO_TREE = {
   '関東': {
     center:[35.68,139.76], radius:180000, zoom:8,
@@ -92,7 +91,6 @@ let geoCircle = null;
 
 /* タグフィルタ */
 const selectedTags = new Set();
-
 
 /* ===== 初期化 ===== */
 function initMap(){
@@ -268,7 +266,6 @@ function filterPlaces(query, opts){
   arr = arr.filter(p=> inGeoScope(p.lat,p.lon));
   arr = arr.filter(p=> inSelection(p.lat,p.lon));
   if (opts.boundsOnly){ const b=map.getBounds(); arr=arr.filter(p=>b.contains([p.lat,p.lon])); }
-
   if (selectedTags.size){ arr = arr.filter(p => (p.tags||[]).some(t => selectedTags.has(t))); }
   if (ts.length){
     arr=arr.filter(p=>{
@@ -312,9 +309,9 @@ function render(list){
         <p class="muted" style="margin:.2em 0 .4em">${p.desc||''}</p>
         <div class="row">${(p.tags||[]).map(t=>`<span class="tag">${t}</span>`).join(' ')} ${price||''}</div>
         <div class="row" style="margin-top:6px">
-           <button type="button" class="btn primary" data-action="detail">詳細（地図/口コミ/★）</button>
+          <button type="button" class="btn primary" data-action="detail">詳細（地図/口コミ/★）</button>
           <button type="button" class="btn" data-action="map">地図で見る</button>
-           <a class="btn" href="${gmapLink(p.lat,p.lon)}" target="_blank" rel="noopener">Googleで開く</a>
+          <a class="btn" href="${gmapLink(p.lat,p.lon)}" target="_blank" rel="noopener">Googleで開く</a>
           <button type="button" class="btn fav-btn ${isFav(p.id)?'active':''}" data-action="fav">${isFav(p.id)?'♥':'♡'} お気に入り</button>
           ${p._d!=null?`<small class="muted">／ 約 ${fmt1(p._d)} km</small>`:''}
         </div>
@@ -324,10 +321,12 @@ function render(list){
       const mk=markerPool.get(p.id); if (mk){ mk.openPopup(); }
       selectedId=p.id; highlightSelected();
     }));
+    card.querySelectorAll('[data-action="detail"]').forEach(b=> b.addEventListener('click', ()=> openPanelFor(p)));
     card.querySelector('[data-action="fav"]').addEventListener('click', ()=>{
       toggleFav(p.id);
       applyFilters(); // 「お気に入りのみ」適用時もUI更新される
     });
+    listEl.appendChild(card);
   });
 
   const keep = new Set(list.map(p=>p.id));
@@ -378,10 +377,12 @@ function openPanelFor(p){
   selectedId = p.id;
   const ratingInfo = avgRating(p.id);
   panelTitle.textContent = p.name;
+
   // Googleマップ埋め込み＋リンク
   const gEmbed = `<div class="map-embed"><iframe loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="${gmapEmbed(p.lat,p.lon,16)}" title="${p.name}の地図"></iframe><p><a class="link-on-dark" href="${gmapLink(p.lat,p.lon)}" target="_blank" rel="noopener">Googleマップで開く</a></p></div>`;
+
   panelContent.innerHTML = `
-  ${gEmbed}
+    ${gEmbed}
     <div class="comment-block">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <div>${starHTMLInline(ratingInfo.avg)}</div>
@@ -390,7 +391,6 @@ function openPanelFor(p){
       <p class="muted-on-dark" style="margin:.4em 0 0">${p.desc||''}</p>
       <p>${(p.tags||[]).map(t=>`<span class="tag" style="background:#0b1220;color:#e5e7eb;border:1px solid #374151">${t}</span>`).join(' ')}</p>
       ${p.student?.available ? `<p class="muted-on-dark"><strong>学割:</strong> 学生 ${yen(p.student.price?.student)}${p.student.price?.adult!=null?`／一般 ${yen(p.student.price.adult)}`:''}<br><small>${p.student.condition||''}</small></p>` : '<p class="muted-on-dark"><small>学割情報なし</small></p>'}
-     
     </div>
 
     <div>
@@ -416,7 +416,7 @@ function openPanelFor(p){
       <div id="panelCommentList"></div>
     </div>
   `;
-  
+
   // お気に入りボタン（パネル）
   updateFavInPanel(p.id);
   favInPanel.onclick = ()=>{ toggleFav(p.id); updateFavInPanel(p.id); applyFilters(); };
@@ -445,18 +445,12 @@ function openPanelFor(p){
     ratingInput.querySelectorAll('.star-btn').forEach(b=> b.classList.remove('active'));
     renderPanelComments(p.id);
     const ri = avgRating(p.id);
-    const ratingRow = panelContent.querySelector('.comment-block > div');
-    if (ratingRow){
-      const starNode = ratingRow.querySelector('div');
-      const textNode = ratingRow.querySelector('.muted-on-dark');
-      if (starNode) starNode.innerHTML = starHTMLInline(ri.avg);
-      if (textNode) textNode.textContent = `${ri.count? ri.avg.toFixed(1) : '—'} / 5 ・ ${ri.count}件`;
-    }
     // 更新
     applyFilters();
   });
   renderPanelComments(p.id);
- // 公式/学割ページへの導線（なければGoogleマップ）
+
+  // 公式/学割ページへの導線（なければGoogleマップ）
   panelLink.href = p.student?.url || gmapLink(p.lat,p.lon);
   panelLink.textContent = p.student?.url ? '学割/公式ページへ' : 'Googleマップを開く';
 
