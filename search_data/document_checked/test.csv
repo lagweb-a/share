@@ -1,0 +1,3 @@
+title,url,snippet,robots_url,robots_http_status,robots_can_fetch,notes,tos_url,tos_http_status,tos_can_scrape,tos_reason,tos_evidence
+あそビュー,https://www.asoview.com/search/?experienceDate=2025-09-16,あそビューです,https://www.asoview.com/robots.txt,200,allowed,,https://www.asoview.com/info/terms/,200,unknown,no_signal,
+wikipedia,https://ja.wikipedia.org/wiki/%E7%AC%AC%E4%B8%89%E6%AC%A1%E3%82%A4%E3%82%BF%E3%83%AA%E3%82%A2%E6%88%A6%E4%BA%89,wikiです,https://ja.wikipedia.org/robots.txt,200,allowed,,https://foundation.wikimedia.org/wiki/Special:MyLanguage/Policy:Terms_of_Use,200,allowed,matched_allow,Management of Websites 12 11. Resolutions and Project Policies 13 12. API Terms 14 13. Termination 15 14. Disputes and Jurisdiction 16 15. D
