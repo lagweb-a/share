@@ -13,7 +13,7 @@ def ensure_parent(path_str: str) -> str:
     return path_str
 
 
-def merge_robot_and_doc(robot_csv: str, doc_csv: str, output_csv: str):
+def append_scraping_permission(robot_csv: str, doc_csv: str, output_csv: str):
     """
     robot_check と document_check の結果をマージして
     'scraping_allowed' カラムを付与する
