@@ -1,0 +1,49 @@
+e test_4 --use-llm-filter --use-llm-scrape --limit 15 --max 100
+🔍 Step1: URL収集 → ./csv/test_4.csv
+957件を保存しました ✅ -> ./csv/test_4.csv
+✅ URL収集完了: ./csv/test_4.csv
+⏱️ Step1 time: 922.36s
+🪄 Step1.5: URLフィルタ → ./csv/test_4_filtered.csv (LLM=ON)
+✅ Filtered: 325 / 404 → ./csv/test_4_filtered.csv (mode=LLM)
+✅ URLフィルタ完了: ./csv/test_4_filtered.csv
+⏱️ Step1.5 time: 23109.15s
+🤖 Step2: robots.txt チェック → ./robot_checked/test_4_with_robot.csv
+✅ robots判定完了: ./robot_checked/test_4_with_robot.csv
+⏱️ Step2 time: 331.74s
+📑 Step3: 利用規約チェック → ./document_checked/test_4_with_tos.csv
+C:\Users\jouak\Desktop\share\search_data\scraping\check_document.py:160: XMLParsedAsHTMLWarning: It looks like you're using an HTML parser to parse an XML document.
+
+Assuming this really is an XML document, what you're doing might work, but you should know that using an XML parser will be more reliable. To parse this document as XML, make sure you have the Python package 'lxml' installed, and pass the keyword argument `features="xml"` into the BeautifulSoup constructor.
+
+If you want or need to use an HTML parser on this document, you can make this warning go away by filtering it. To do that, run this code before calling the BeautifulSoup constructor:
+
+    from bs4 import XMLParsedAsHTMLWarning
+    import warnings
+
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+
+  soup = BeautifulSoup(resp.text, "lxml") if BeautifulSoup else BeautifulSoup(resp.text, "html.parser")
+C:\Users\jouak\Desktop\share\search_data\scraping\check_document.py:332: XMLParsedAsHTMLWarning: It looks like you're using an HTML parser to parse an XML document.
+
+Assuming this really is an XML document, what you're doing might work, but you should know that using an XML parser will be more reliable. To parse this document as XML, make sure you have the Python package 'lxml' installed, and pass the keyword argument `features="xml"` into the BeautifulSoup constructor.
+
+If you want or need to use an HTML parser on this document, you can make this warning go away by filtering it. To do that, run this code before calling the BeautifulSoup constructor:
+
+    from bs4 import XMLParsedAsHTMLWarning
+    import warnings
+
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+
+  soup = BeautifulSoup(html, "lxml") if BeautifulSoup else BeautifulSoup(html, "html.parser")
+✅ 利用規約判定完了: ./document_checked/test_4_with_tos.csv
+⏱️ Step3 time: 13935.81s
+⚖️ Step4: スクレイピング可否判定 → ./final_checked/test_4_final.csv
+✅ 統合結果を書き出しました: ./final_checked/test_4_final.csv
+✅ 可否判定完了: ./final_checked/test_4_final.csv
+⏱️ Step4 time: 0.02s
+🕷 Step5: 実スクレイピング → ./scraped/test_4_scraped.csv (LLM=ON)
+✅ Scraped: 15 URLs → ./scraped/test_4_scraped.csv
+✅ 実スクレイピング完了: ./scraped/test_4_scraped.csv
+⏱️ Step5 time: 2448.99s
+🧮 Total time: 19948.07s
+🎉 パイプライン完了: 出力ファイル = ./scraped/test_4_scraped.csv

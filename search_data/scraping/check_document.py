@@ -1,9 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-既存CSV(robots判定付き)に、利用規約(=ToS)スクレイピングの可否を追記する関数版
+既存CSV(robots判定付き)に、利用規約(=ToS)スクレイピングの可否を追記する関数版（高速化）
 - サブドメイン→親ドメイン(eTLD+1)フォールバック
 - 既知サイトマップ（asoview等）
 - 規約ページは見つかったが禁止/許可文言なし → tos_reason='tos_found_no_signal'
+- 時短ポイント:
+  * 候補URLを優先度順に少数だけチェック（早期打ち切り）
+  * 代表ページのリンク探索は "/" と "/about/" "/company/" に限定・上限つき
+  * サイトマップは最大5件、ヒットURLも短いものを各キー最大2件まで
+  * HEADで存在確認→必要時のみGET（HTML読み込みを減らす）
+  * サブドメイン群で同一apex結果を共有する広域キャッシュ
+  * 正規表現の事前コンパイル
 """
 
 import csv
@@ -27,8 +34,16 @@ DEFAULT_TIMEOUT = 12
 DEFAULT_SLEEP_NEW_NETLOC = 0.6
 DEFAULT_SLEEP_LIGHT = 0.15
 DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; SpotAppRobot/1.0; +https://example.com/robot)"
+    "User-Agent": "Mozilla/5.0 (compatible; SpotAppRobot/1.0; +https://example.com/robot)",
+    "Accept-Encoding": "gzip, deflate, br",
 }
+
+# ---- 時短用上限（必要に応じて調整可能。精度担保のため保守的に設定）----
+MAX_DISCOVER_LINKS_PER_PAGE = 6   # 代表ページ1枚あたり拾うリンク上限
+MAX_DISCOVER_PAGES = 3            # "/", "/about/", "/company/" のみに限定
+MAX_SITEMAPS = 5                  # robots.txt内のSitemap: 最大5件
+MAX_SITEMAP_HITS_PER_KEY = 2      # terms/kiyaku等のキーごとに短いURL上位2件まで
+MAX_CANDIDATES_TOTAL = 18         # 最終的に検査する候補URLの総数上限（早期打ち切り）
 
 def _ensure_parent(path_str: str) -> str:
     Path(path_str).parent.mkdir(parents=True, exist_ok=True)
@@ -41,7 +56,7 @@ def _make_session(headers: Dict[str, str], timeout: int) -> requests.Session:
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["GET", "HEAD"]
     )
-    adapter = HTTPAdapter(max_retries=retries)
+    adapter = HTTPAdapter(max_retries=retries, pool_connections=32, pool_maxsize=32)
     sess.mount("http://", adapter)
     sess.mount("https://", adapter)
     sess.headers.update(headers)
@@ -56,16 +71,17 @@ KNOWN_TOS_MAP = {
     "wikipedia.org":   "https://foundation.wikimedia.org/wiki/Special:MyLanguage/Policy:Terms_of_Use",
 }
 
-# 候補パスとアンカー語
+# 候補パス（優先度順：短く一般的なものを先頭に）
 CANDIDATE_PATHS = [
-    "/terms", "/terms/", "/terms-of-service", "/terms-of-service/",
+    "/terms", "/terms/", "/tos", "/tos/",
+    "/terms-of-service", "/terms-of-service/",
     "/terms-and-conditions", "/terms-and-conditions/",
-    "/tos", "/tos/", "/legal/terms", "/legal/terms/",
+    "/legal/terms", "/legal/terms/",
     "/agreement", "/agreement/", "/user-agreement", "/user-agreement/",
-    "/rules", "/rules/", "/guidelines", "/guidelines/",
+    "/rules", "/rules/",
     "/policy", "/policy/", "/policies", "/policies/", "/sitepolicy", "/sitepolicy/",
     "/kiyaku", "/kiyaku/", "/riyokiyaku", "/riyokiyaku/",
-    "/利用規約", "/利用規約/", "/ご利用にあたって", "/ご利用にあたって/",
+    "/利用規約", "/利用規約/",
     "/ご利用条件", "/ご利用条件/", "/会員規約", "/会員規約/",
     "/guide/terms", "/guide/terms/", "/help/terms", "/help/terms/",
     "/company/terms", "/company/terms/", "/about/terms", "/about/terms/",
@@ -77,30 +93,35 @@ ANCHOR_KEYWORDS = [
     "Terms","Terms of Service","Terms & Conditions","Policies","Policy","Legal","Rules","Agreement","User Agreement"
 ]
 
-# 判定パターン
-FORBID_PATTERNS = [
-    r"スクレイピング(を)?(禁止|禁ずる|しないで)",
-    r"クローリング(を)?(禁止|禁ずる)",
-    r"自動(化|的)手段(での)?(アクセス|取得|収集)を?禁止",
-    r"(ボット|bot|ロボット|robot|クローラ|crawler|spider).*(禁止|不可|許可しない)",
-    r"データ(の)?(収集|抽出|マイニング|収拾).*(禁止|不可)",
-    r"無断(転載|複製|複写|再配布).*(禁止|不可)",
-    r"\b(scrap(e|ing)|crawl(ing)?|spider(ing)?|harvest(ing)?|automated\s+means)\b.*(prohibit|forbid|not\s+allow|disallow|禁止)",
+# ---- 判定パターン（事前コンパイル）----
+_FORBID_RES = [
+    re.compile(p, re.I) for p in [
+        r"スクレイピング(を)?(禁止|禁ずる|しないで)",
+        r"クローリング(を)?(禁止|禁ずる)",
+        r"自動(化|的)手段(での)?(アクセス|取得|収集)を?禁止",
+        r"(ボット|bot|ロボット|robot|クローラ|crawler|spider).*(禁止|不可|許可しない)",
+        r"データ(の)?(収集|抽出|マイニング|収拾).*(禁止|不可)",
+        r"\b(scrap(e|ing)|crawl(ing)?|spider(ing)?|harvest(ing)?|automated\s+means)\b.*(prohibit|forbid|not\s+allow|disallow|禁止)",
+    ]
 ]
-ALLOW_PATTERNS = [
-    r"公式API(の)?利用(を)?認め(る|ています)",
-    r"API(の)?利用(が)?可能",
-    r"データ(の)?(引用|転載)は(出典明記|条件付き)で可",
-    r"\bAPI\b.*(allowed|permit|利用可|ご利用いただけます)",
-    r"Creative\s*Commons|CC[- ]BY|オープンデータ|Open\s*Data",
+_ALLOW_RES = [
+    re.compile(p, re.I) for p in [
+        r"公式API(の)?利用(を)?認め(る|ています)",
+        r"API(の)?利用(が)?可能",
+        r"データ(の)?(引用|転載)は(出典明記|条件付き)で可",
+        r"\bAPI\b.*(allowed|permit|利用可|ご利用いただけます)",
+        r"Creative\s*Commons|CC[- ]BY|オープンデータ|Open\s*Data",
+    ]
 ]
-CONDITIONAL_PATTERNS = [
-    r"(事前|書面)の(許可|承諾)が必要",
-    r"当社の(許諾|承認)なく.*(禁止|できません)",
-    r"商用(目的|利用)は(禁止|不可)",
-    r"非商用(に限り|のみ)許可",
-    r"(合理的|一定)の範囲(内)?での(引用|転載).*(可|認める)",
-    r"\bwith\s+prior\s+(written\s+)?consent\b",
+_CONDITIONAL_RES = [
+    re.compile(p, re.I) for p in [
+        r"(事前|書面)の(許可|承諾)が必要",
+        r"当社の(許諾|承認)なく.*(禁止|できません)",
+        r"商用(目的|利用)は(禁止|不可)",
+        r"非商用(に限り|のみ)許可",
+        r"(合理的|一定)の範囲(内)?での(引用|転載).*(可|認める)",
+        r"\bwith\s+prior\s+(written\s+)?consent\b",
+    ]
 ]
 
 def _normalize_text(html_or_text: str) -> str:
@@ -113,7 +134,16 @@ def _make_snippet(text: str, span: Tuple[int, int], width=140) -> str:
     s = max(0, start - width//2); e = min(len(text), end + width//2)
     return re.sub(r"\s+", " ", text[s:e].strip())[:width]
 
-def _fetch(session: requests.Session, url: str, timeout: int):
+def _head_exists(session: requests.Session, url: str, timeout: int) -> Tuple[bool, int, str, str]:
+    """HEADで存在/種別を素早く確認してから、必要ならGETに進む"""
+    try:
+        r = session.head(url, timeout=timeout, allow_redirects=True)
+        ctype = (r.headers.get("Content-Type") or "").lower()
+        return (200 <= r.status_code < 400), r.status_code, ctype, r.url
+    except requests.RequestException:
+        return False, 0, "", ""
+
+def _get(session: requests.Session, url: str, timeout: int):
     try:
         resp = session.get(url, timeout=timeout, allow_redirects=True)
         ctype = (resp.headers.get("Content-Type") or "").lower()
@@ -121,82 +151,210 @@ def _fetch(session: requests.Session, url: str, timeout: int):
     except requests.RequestException:
         return None, None
 
-def _discover_links(session: requests.Session, page_url: str, timeout: int) -> Set[str]:
-    out: Set[str] = set()
-    resp, ctype = _fetch(session, page_url, timeout)
+def _discover_links(session: requests.Session, page_url: str, timeout: int) -> List[str]:
+    """代表ページから規約らしいアンカーを少数だけ拾う（テキスト/URLともにキーワード判定）"""
+    out: List[str] = []
+    resp, ctype = _get(session, page_url, timeout)
     if not resp or not resp.text or "text/html" not in (ctype or ""):
         return out
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(resp.text, "lxml") if BeautifulSoup else BeautifulSoup(resp.text, "html.parser")
+    hits = 0
     for a in soup.select("a[href]"):
+        if hits >= MAX_DISCOVER_LINKS_PER_PAGE:
+            break
         txt = (a.get_text() or "").strip()
         href = a.get("href") or ""
-        if not txt or not href:
+        if not href:
             continue
-        if any(k.lower() in txt.lower() for k in ANCHOR_KEYWORDS):
-            out.add(urljoin(resp.url, href))
+        test = f"{txt} {href}"
+        if any(k.lower() in test.lower() for k in ANCHOR_KEYWORDS):
+            out.append(urljoin(resp.url, href))
+            hits += 1
     return out
 
 def _enumerate_tos_candidates(session: requests.Session, base: str, timeout: int) -> List[str]:
     # base は "https://netloc"
-    cand: List[str] = [base + p for p in CANDIDATE_PATHS]
-    # 代表ページ群からのリンク探索
-    for p in ["/", "/about/", "/company/", "/guide/", "/help/"]:
-        cand.extend(list(_discover_links(session, urljoin(base, p), timeout)))
-    # robots.txt → sitemap
+    cand: List[str] = []
+
+    # 1) 代表的な固定パス（優先度順）をまず詰める
+    for p in CANDIDATE_PATHS:
+        cand.append(base + p)
+
+    # 2) 代表ページからのリンク探索（上限＆ページ限定）
+    for p in ["/", "/about/", "/company/"][:MAX_DISCOVER_PAGES]:
+        cand.extend(_discover_links(session, urljoin(base, p), timeout))
+
+    # 3) robots.txt → sitemap
     robots_url = urljoin(base, "/robots.txt")
-    resp, _ = _fetch(session, robots_url, timeout)
-    sitemap_urls = []
-    if resp and resp.ok and resp.text:
-        for line in resp.text.splitlines():
+    sm_resp, _ = _get(session, robots_url, timeout)
+    sitemap_urls: List[str] = []
+    if sm_resp and sm_resp.ok and sm_resp.text:
+        for line in sm_resp.text.splitlines():
             if line.lower().startswith("sitemap:"):
                 sm = line.split(":", 1)[1].strip()
                 sitemap_urls.append(sm)
-    # 軽量サイトマップ走査
+    sitemap_urls = sitemap_urls[:MAX_SITEMAPS]
+
+    # 4) 軽量サイトマップ走査（各キーごとに短いURL上位のみ）
     key_subs = ("terms", "kiyaku", "policy", "policies", "rules", "agreement", "riyokiyaku", "sitepolicy")
-    for sm in sitemap_urls[:5]:
-        sm_resp, _ = _fetch(session, sm, timeout)
-        if not sm_resp or not sm_resp.ok:
+    for sm in sitemap_urls:
+        r, _ctype = _get(session, sm, timeout)
+        if not r or not r.ok:
             continue
-        text = sm_resp.text or ""
-        urls = []
+        text = r.text or ""
+        urls: List[str] = []
         try:
             root = ET.fromstring(text)
             ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
             for loc in root.findall(".//sm:url/sm:loc", ns):
-                urls.append((loc.text or "").strip())
+                if loc.text:
+                    urls.append(loc.text.strip())
             if not urls:
                 for loc in root.findall(".//sm:sitemap/sm:loc", ns):
-                    urls.append((loc.text or "").strip())
+                    if loc.text:
+                        urls.append(loc.text.strip())
         except ET.ParseError:
             urls = re.findall(r"<loc>\s*([^<]+)\s*</loc>", text, flags=re.I)
+        if not urls:
+            continue
+        # キーごとに短いURL順で2件まで
+        lower_map = {}
         for u in urls:
-            if any(k in (u or "").lower() for k in key_subs):
-                cand.append(u)
-    # 重複整理
-    uniq, seen = [], set()
+            lu = (u or "").lower()
+            for k in key_subs:
+                if k in lu:
+                    lower_map.setdefault(k, []).append(u)
+        for k, items in lower_map.items():
+            items_sorted = sorted(items, key=lambda x: len(x or ""))
+            cand.extend(items_sorted[:MAX_SITEMAP_HITS_PER_KEY])
+
+    # 5) 重複整理＆上限カット（短いURL優先）
+    uniq = []
+    seen = set()
     for u in cand:
         u2 = (u or "").rstrip("/")
         if u2 and u2 not in seen:
-            seen.add(u2); uniq.append(u)
-    return uniq
+            seen.add(u2); uniq.append(u2)
+    uniq_sorted = sorted(uniq, key=lambda x: len(x))
+    return uniq_sorted[:MAX_CANDIDATES_TOTAL]
 
 def _judge_from_text(text: str):
-    for pat in FORBID_PATTERNS:
-        m = re.search(pat, text, flags=re.I)
+    for cre in _FORBID_RES:
+        m = cre.search(text)
         if m:
             return "forbidden", "matched_forbid", _make_snippet(text, m.span())
-    for pat in ALLOW_PATTERNS:
-        m = re.search(pat, text, flags=re.I)
+    for cre in _ALLOW_RES:
+        m = cre.search(text)
         if m:
             return "allowed", "matched_allow", _make_snippet(text, m.span())
-    for pat in CONDITIONAL_PATTERNS:
-        m = re.search(pat, text, flags=re.I)
+    for cre in _CONDITIONAL_RES:
+        m = cre.search(text)
         if m:
             return "conditional", "matched_conditional", _make_snippet(text, m.span())
     return "unknown", "no_signal", ""
 
+def _evaluate_candidate(session: requests.Session, url: str, timeout: int, prefer_reason_prefix: str = "") -> Dict[str, Any]:
+    """個別候補の評価（HEAD→必要ならGET）。HTML以外はPDFのみ特例扱い。"""
+    ok, status, ctype, final_url = _head_exists(session, url, timeout)
+    if not ok and status not in (405, 403):  # HEAD非対応や権限系はGETにフォールバック
+        return {}
+    # PDFは即unknown（PDF terms検知）
+    if "pdf" in (ctype or ""):
+        return {
+            "tos_url": final_url or url, "tos_http_status": status or "",
+            "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "pdf_terms_detected").strip(),
+            "tos_evidence": ""
+        }
+    # HTML以外はスキップ
+    if "text/html" not in (ctype or ""):
+        # Content-Typeが取れない/HEADで不明ならGETして判定
+        resp, ctype2 = _get(session, url, timeout)
+        if not resp:
+            return {}
+        if "pdf" in (ctype2 or ""):
+            return {
+                "tos_url": resp.url, "tos_http_status": resp.status_code,
+                "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "pdf_terms_detected").strip(),
+                "tos_evidence": ""
+            }
+        if "text/html" not in (ctype2 or ""):
+            return {}
+        html = resp.text or ""
+        if not html:
+            return {
+                "tos_url": resp.url, "tos_http_status": resp.status_code,
+                "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "empty_html").strip(),
+                "tos_evidence": ""
+            }
+        soup = BeautifulSoup(html, "lxml") if BeautifulSoup else BeautifulSoup(html, "html.parser")
+        text = _normalize_text(soup.get_text(" "))
+        if not text:
+            return {
+                "tos_url": resp.url, "tos_http_status": resp.status_code,
+                "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "empty_html").strip(),
+                "tos_evidence": ""
+            }
+        verdict, reason, evidence = _judge_from_text(text)
+        if verdict == "unknown":
+            title = (soup.title.string.strip() if soup.title and soup.title.string else "")
+            if any(k.lower() in title.lower() for k in ANCHOR_KEYWORDS):
+                return {
+                    "tos_url": resp.url, "tos_http_status": resp.status_code,
+                    "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "tos_found_no_signal").strip(),
+                    "tos_evidence": ""
+                }
+            return {}
+        return {
+            "tos_url": resp.url, "tos_http_status": resp.status_code,
+            "tos_can_scrape": verdict, "tos_reason": (prefer_reason_prefix + reason).strip(),
+            "tos_evidence": evidence
+        }
+
+    # HTML見込み：最初からGETして判定
+    resp, ctype = _get(session, url, timeout)
+    if not resp:
+        return {}
+    if "pdf" in (ctype or ""):
+        return {
+            "tos_url": resp.url, "tos_http_status": resp.status_code,
+            "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "pdf_terms_detected").strip(),
+            "tos_evidence": ""
+        }
+    if "text/html" not in (ctype or ""):
+        return {}
+    html = resp.text or ""
+    if not html:
+        return {
+            "tos_url": resp.url, "tos_http_status": resp.status_code,
+            "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "empty_html").strip(),
+            "tos_evidence": ""
+        }
+    soup = BeautifulSoup(html, "lxml") if BeautifulSoup else BeautifulSoup(html, "html.parser")
+    text = _normalize_text(soup.get_text(" "))
+    if not text:
+        return {
+            "tos_url": resp.url, "tos_http_status": resp.status_code,
+            "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "empty_html").strip(),
+            "tos_evidence": ""
+        }
+    verdict, reason, evidence = _judge_from_text(text)
+    if verdict == "unknown":
+        title = (soup.title.string.strip() if soup.title and soup.title.string else "")
+        if any(k.lower() in title.lower() for k in ANCHOR_KEYWORDS):
+            return {
+                "tos_url": resp.url, "tos_http_status": resp.status_code,
+                "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "tos_found_no_signal").strip(),
+                "tos_evidence": ""
+            }
+        return {}
+    return {
+        "tos_url": resp.url, "tos_http_status": resp.status_code,
+        "tos_can_scrape": verdict, "tos_reason": (prefer_reason_prefix + reason).strip(),
+        "tos_evidence": evidence
+    }
+
 def _evaluate_on_base(session: requests.Session, base: str, timeout: int, prefer_reason_prefix: str = "") -> Dict[str, Any]:
-    """base='https://netloc' を対象に探索・判定"""
+    """base='https://netloc' を対象に探索・判定（優先度順・早期打ち切り）"""
     result: Dict[str, Any] = {
         "tos_url": "",
         "tos_http_status": "",
@@ -205,104 +363,32 @@ def _evaluate_on_base(session: requests.Session, base: str, timeout: int, prefer
         "tos_evidence": ""
     }
 
-    # 既知URL
+    # 既知URL最優先
     netloc = urlparse(base).netloc.lower()
     known = KNOWN_TOS_MAP.get(netloc)
     if known:
         known_url = known if known.startswith("http") else urljoin(base, known)
-        resp, ctype = _fetch(session, known_url, timeout)
-        if resp and resp.status_code != 404:
-            if "pdf" in (ctype or ""):
-                result.update({
-                    "tos_url": resp.url, "tos_http_status": resp.status_code,
-                    "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "pdf_terms_detected").strip(),
-                    "tos_evidence": ""
-                })
-                return result
-            if "text/html" in (ctype or "") and (resp.text or ""):
-                soup = BeautifulSoup(resp.text, "html.parser")
-                text = _normalize_text(soup.get_text(" "))
-                verdict, reason, evidence = _judge_from_text(text)
-                if verdict == "unknown":
-                    result.update({
-                        "tos_url": resp.url, "tos_http_status": resp.status_code,
-                        "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "tos_found_no_signal").strip(),
-                        "tos_evidence": ""
-                    })
-                    return result
-                result.update({
-                    "tos_url": resp.url, "tos_http_status": resp.status_code,
-                    "tos_can_scrape": verdict, "tos_reason": (prefer_reason_prefix + reason).strip(),
-                    "tos_evidence": evidence
-                })
-                return result
+        ev = _evaluate_candidate(session, known_url, timeout, prefer_reason_prefix)
+        if ev:
+            return ev
 
-    # 候補列挙
+    # 候補列挙（優先度順・上限あり）
     candidates = _enumerate_tos_candidates(session, base, timeout)
     for url in candidates:
-        resp, ctype = _fetch(session, url, timeout)
-        if not resp or resp.status_code == 404:
-            continue
-
-        # PDF
-        if "pdf" in (ctype or ""):
-            result.update({
-                "tos_url": resp.url, "tos_http_status": resp.status_code,
-                "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "pdf_terms_detected").strip(),
-                "tos_evidence": ""
-            })
-            return result
-
-        if "text/html" not in (ctype or ""):
-            continue
-
-        soup = BeautifulSoup(resp.text or "", "html.parser")
-        text = _normalize_text(soup.get_text(" "))
-        if not text:
-            result.update({
-                "tos_url": resp.url, "tos_http_status": resp.status_code,
-                "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "empty_html").strip(),
-                "tos_evidence": ""
-            })
-            return result
-
-        verdict, reason, evidence = _judge_from_text(text)
-
-        # アンカーテキスト/タイトルに「規約」等があり、シグナル無い場合は tos_found_no_signal
-        title = (soup.title.string.strip() if soup.title and soup.title.string else "")
-        if verdict == "unknown" and any(k.lower() in title.lower() for k in ANCHOR_KEYWORDS):
-            result.update({
-                "tos_url": resp.url, "tos_http_status": resp.status_code,
-                "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "tos_found_no_signal").strip(),
-                "tos_evidence": ""
-            })
-            return result
-
-        if verdict in ("forbidden","allowed","conditional"):
-            result.update({
-                "tos_url": resp.url, "tos_http_status": resp.status_code,
-                "tos_can_scrape": verdict, "tos_reason": (prefer_reason_prefix + reason).strip(),
-                "tos_evidence": evidence
-            })
-            return result
-
-        # まだ不明なら次候補へ
-        last = {
-            "tos_url": resp.url, "tos_http_status": resp.status_code,
-            "tos_can_scrape": "unknown", "tos_reason": (prefer_reason_prefix + "no_signal").strip(),
-            "tos_evidence": ""
-        }
-        result = last  # 最後の結果を保持
-
+        ev = _evaluate_candidate(session, url, timeout, prefer_reason_prefix)
+        if ev:
+            return ev
     return result
 
-# キャッシュ（モジュール内で共有）
+# キャッシュ（モジュール内で共有）— apexとサブドメインの両方で使い回し
 _TOS_CACHE: Dict[str, Dict[str, Any]] = {}
+_TOS_CACHE_APEX: Dict[str, Dict[str, Any]] = {}
 
 def _evaluate_tos_for_url(session: requests.Session, url: str, timeout: int) -> Dict[str, Any]:
     """
     1) サブドメインのまま探索
     2) 取れなければ 親ドメイン(eTLD+1) でもう一度
+    ※ 両者の結果はキャッシュを共有（多サブドメインで高速化）
     """
     parsed = urlparse(url)
     scheme, netloc = parsed.scheme, parsed.netloc
@@ -310,19 +396,28 @@ def _evaluate_tos_for_url(session: requests.Session, url: str, timeout: int) -> 
     if key in _TOS_CACHE:
         return _TOS_CACHE[key]
 
+    # 先にapexキャッシュを参照（同じapexの別サブドメインを高速化）
+    ext = tldextract.extract(netloc)
+    apex = ".".join([p for p in [ext.domain, ext.suffix] if p])  # eTLD+1
+    if apex and apex.lower() in _TOS_CACHE_APEX:
+        res_apex = _TOS_CACHE_APEX[apex.lower()]
+        _TOS_CACHE[key] = res_apex
+        return res_apex
+
     base = f"{scheme}://{netloc}"
     res = _evaluate_on_base(session, base, timeout, prefer_reason_prefix="")
     if res.get("tos_url") or res.get("tos_reason") != "not_found":
         _TOS_CACHE[key] = res
+        # サブドメインの結果でも「許可/禁止/条件あり/No Signal取得済み」ならapex側にも共有しておく
+        _TOS_CACHE_APEX.setdefault(apex.lower(), res)
         return res
 
     # eTLD+1 フォールバック
-    ext = tldextract.extract(netloc)
-    registrable = ".".join([p for p in [ext.domain, ext.suffix] if p])
-    if registrable and registrable.lower() != netloc.lower():
-        base2 = f"{scheme}://{registrable}"
+    if apex and apex.lower() != netloc.lower():
+        base2 = f"{scheme}://{apex}"
         res2 = _evaluate_on_base(session, base2, timeout, prefer_reason_prefix="apex:")
         _TOS_CACHE[key] = res2
+        _TOS_CACHE_APEX[apex.lower()] = res2
         return res2
 
     _TOS_CACHE[key] = res
@@ -368,7 +463,7 @@ def append_tos_info(
                        "tos_reason":"invalid_url", "tos_evidence":""}
                 writer.writerow(out); continue
 
-            # レート制御
+            # レート制御（同一netlocは軽スリープ）
             if last_netloc != netloc:
                 time.sleep(sleep_new_netloc)
                 last_netloc = netloc

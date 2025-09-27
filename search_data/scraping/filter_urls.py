@@ -102,7 +102,8 @@ def rule_based_keep(title: str, url: str, snippet: str) -> bool:
 # ---------------- LLM (Ollama) 判定 ----------------
 
 LLM_ENDPOINT = "http://localhost:11434/api/generate"
-LLM_MODEL_DEFAULT = "qwen2.5:7b-instruct-q5_1"
+#LLM_MODEL_DEFAULT = "qwen2.5:7b-instruct-q5_1"
+LLM_MODEL_DEFAULT = "qwen2.5:14b-instruct-q4_K_M"
 
 LLM_PROMPT_TMPL = """あなたは日本語の分類アシスタントです。以下のアイテムごとに「学割スポット/アクティビティの
 公式・販売・施設情報ページか」を判定してください。返すのは厳密なJSONのみです。
