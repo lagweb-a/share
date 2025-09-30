@@ -1,30 +1,44 @@
 /* ===== データ（横浜サンプル） ===== */
-const PLACES = [
-  { id:'chinatown',   name:'横浜中華街', lat:35.4437, lon:139.6380, tags:['グルメ','観光','エリア'],
-    desc:'約600店が集まる日本最大級のチャイナタウン。', thumb:'https://source.unsplash.com/800x600/?yokohama,chinatown,lantern',
-    student:{ available:false, url:'https://www.chinatown.or.jp/' } },
-  { id:'akarenga',    name:'横浜赤レンガ倉庫', lat:35.4513, lon:139.6400, tags:['建築','イベント','ショッピング'],
-    desc:'歴史的建造物を活用した商業＆イベント施設。通常入場無料（イベント別途）。', thumb:'https://source.unsplash.com/800x600/?yokohama,red-brick,warehouse',
-    student:{ available:false, url:'https://www.yokohama-akarenga.jp/' } },
-  { id:'minatomirai', name:'みなとみらい21', lat:35.4540, lon:139.6326, tags:['景観','展望','ウォーターフロント'],
-    desc:'観光名所が点在するウォーターフロント地区。', thumb:'https://source.unsplash.com/800x600/?minatomirai,yokohama,skyline',
-    student:{ available:false } },
-  { id:'yamashita',   name:'山下公園', lat:35.4433, lon:139.6507, tags:['公園','海','散策'],
-    desc:'港に面した海辺の都市公園（入園無料）。', thumb:'https://source.unsplash.com/800x600/?yokohama,park,sea',
-    student:{ available:false, url:'https://www.yokohamajapan.com/things-to-do/detail.php?bbid=190' } },
-  { id:'cupnoodles',  name:'カップヌードルミュージアム 横浜', lat:35.4564, lon:139.6389, tags:['博物館','体験','屋内'],
-    desc:'インスタントラーメンの歴史と体験が楽しめるミュージアム。', thumb:'https://source.unsplash.com/800x600/?museum,exhibition',
-    student:{ available:true, price:{ student:0, adult:500 }, condition:'高校生以下は入館無料／大人（大学生以上）500円。体験は別料金。', url:'https://www.cupnoodles-museum.jp/en/yokohama/guide/admission/' } },
-  { id:'sankeien',    name:'三溪園', lat:35.4160, lon:139.6530, tags:['庭園','文化','自然'],
-    desc:'歴史的建造物と四季の景観が美しい日本庭園。', thumb:'https://source.unsplash.com/800x600/?japanese,garden,temple',
-    student:{ available:true, price:{ student:200, adult:900 }, condition:'小・中学生200円／高校生以上900円', url:'https://www.sankeien.or.jp/price-service/' } },
-  { id:'osanbashi',   name:'大さん橋', lat:35.4519, lon:139.6523, tags:['海','建築','景観'],
-    desc:'屋上広場は24時間開放のビュースポット（無料）。', thumb:'https://source.unsplash.com/800x600/?yokohama,port,pier',
-    student:{ available:false, url:'https://osanbashi.jp/en/rooftop/' } },
-  { id:'marinetower', name:'横浜マリンタワー', lat:35.4437, lon:139.6526, tags:['展望','夜景','ランドマーク'],
-    desc:'横浜の街と港を一望できる展望タワー。', thumb:'https://source.unsplash.com/800x600/?yokohama,tower,city',
-    student:{ available:true, price:{ student:500, adult:1000 }, condition:'平日デイ 小中500円／高校生以上1,000円（時間帯で変動）', url:'https://marinetower.yokohama/price-hours/' } }
+let PLACES = [
+
 ];
+
+// Flask の /api/spots からJSONを取得
+async function fetchSpots(params = {}) {
+  const usp = new URLSearchParams(params);
+  const res = await fetch(`/api/spots?${usp.toString()}`);
+  if (!res.ok) throw new Error('APIエラー');
+  return res.json();
+}
+
+// API返却: id,name,url,address,lat,lon,tags,description,image_url,price
+function normalizeSpot(raw, idx) {
+  const id  = raw.id ?? String(idx);
+  const lat = (raw.lat !== '' && raw.lat != null && !isNaN(Number(raw.lat))) ? Number(raw.lat) : null;
+  const lon = (raw.lon !== '' && raw.lon != null && !isNaN(Number(raw.lon))) ? Number(raw.lon) : null;
+
+  // "横浜|赤レンガ|イベント" → ["横浜","赤レンガ","イベント"]
+  const tags = typeof raw.tags === 'string'
+    ? raw.tags.split('|').map(s=>s.trim()).filter(Boolean)
+    : (Array.isArray(raw.tags) ? raw.tags : []);
+
+  // 価格は必要に応じて拡張可能（現状は学割UIなしなので固定で unavailable）
+  return {
+    id,
+    name: raw.name || '',
+    lat,
+    lon,
+    desc: raw.description || '',
+    tags,
+    address: raw.address || '',
+    url: raw.url || '',
+    thumb: raw.image_url || '',     // ← カード画像で利用
+    // 学割フラグ：データ列が無いのでUI上はオフにしておく
+    student: { available:false }
+  };
+}
+
+
 
 /* ===== 地理ツリー（外部JSONをロード） ===== */
 let GEO_TREE = null;   // 全国ツリー
@@ -507,12 +521,21 @@ function renderPanelComments(placeId){
   }).join('');
 }
 
-/* ===== 起動・イベント ===== */
-initMap(); 
-buildTagBar(); 
-render(PLACES); 
-updateFavCounter();
-loadGeoTree(); // ★ 地理ツリーデータ読込
+(async function bootstrap(){
+  try {
+    const raw = await fetchSpots();      // ① API取得
+    PLACES = raw.map(normalizeSpot);     // ② 正規化して PLACES に代入
+  } catch (e) {
+    console.error(e);
+    showToast('データ取得に失敗しました');
+    PLACES = [];
+  }
+  initMap();                             // ③ 地図初期化（マーカー生成は中で）
+  buildTagBar();                         // ④ タグバー作成（PLACESを元に）
+  render(PLACES);                        // ⑤ 初回描画
+  updateFavCounter();
+  loadGeoTree();                         // ⑥ 地理ツリー読み込み
+})();
 
 document.getElementById('searchForm')?.addEventListener('submit', e=>{ e.preventDefault(); applyFilters(); });
 document.getElementById('q')?.addEventListener('input', ()=> applyFilters());

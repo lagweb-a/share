@@ -26,18 +26,6 @@ def load_spots():
     for col in ("lat", "lon"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # lat/lonが無い行だけ住所から取得
-    # for idx, row in df.iterrows():
-    #     if pd.isna(row["lat"]) or pd.isna(row["lon"]):
-    #         # 住所がある前提（nameやdescだけなら変換不可）
-    #         address = f"{row.get('address','')}"
-    #         if address:
-    #             lat, lon = geocode_address(address)
-    #             if lat and lon:
-    #                 df.at[idx, "lat"] = lat
-    #                 df.at[idx, "lon"] = lon
-    #                 time.sleep(1)  # Nominatimレート制限対策
-
     # NaN を空文字に置き換えて dict のリストに変換
     spots = df.fillna("").to_dict(orient="records")
     return spots
