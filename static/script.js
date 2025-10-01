@@ -47,7 +47,7 @@ let GEO_READY = false; // ロード完了フラグ
 async function loadGeoTree(){
   try{
     // 生成した GEO_TREE.json を同階層に置く（必要ならパス変更）
-    const res = await fetch('./GEO_TREE.sample.json', { cache: 'force-cache' });
+    const res = await fetch('/templates/GEO_TREE.sample.json', { cache: 'force-cache' });
     if (!res.ok) throw new Error('GEO_TREE.json を取得できませんでした');
     GEO_TREE = await res.json();
     GEO_READY = true;
