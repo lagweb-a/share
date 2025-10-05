@@ -50,7 +50,7 @@
       <div class="geo-cascade">
         <select id="regionSelect" aria-label="地方">
           <option value="">地方（未選択）</option>
-          <option value="関東">関東</option>
+          
         </select>
         <select id="prefSelect" aria-label="都道府県" disabled>
           <option value="">都道府県（まず地方を選択）</option>
@@ -61,7 +61,27 @@
         <button id="clearGeo" class="btn ghost" type="button">× 地域クリア</button>
       </div>
 
-      
+      <!-- 地域データ：HTML属性として保持（JSONファイルは不使用） -->
+      <div id="geoData" hidden>
+        <div data-region="関東" data-center="35.68,139.76" data-radius="180000" data-zoom="8" data-bbox="138.5,34.5,141.5,36.5">
+          <div data-pref="神奈川県" data-center="35.4478,139.6425" data-radius="65000" data-zoom="10" data-bbox="139.0,35.1,139.9,35.6">
+            <div data-city="横浜市" data-center="35.4478,139.6425" data-radius="18000" data-zoom="13" data-bbox="139.52,35.36,139.69,35.55"></div>
+            <div data-city="川崎市" data-center="35.5308,139.7036" data-radius="14000" data-zoom="13" data-bbox="139.56,35.48,139.8,35.63"></div>
+            <div data-city="鎌倉市" data-center="35.3192,139.5467" data-radius="9000" data-zoom="13" data-bbox="139.47,35.27,139.61,35.36"></div>
+          </div>
+          <div data-pref="東京都" data-center="35.6762,139.6503" data-radius="50000" data-zoom="10" data-bbox="139.35,35.53,139.95,35.9">
+            <div data-city="千代田区" data-center="35.6938,139.753" data-radius="3000" data-zoom="13" data-bbox="139.73,35.68,139.78,35.71"></div>
+            <div data-city="新宿区" data-center="35.6938,139.7034" data-radius="4000" data-zoom="13" data-bbox="139.67,35.67,139.73,35.72"></div>
+          </div>
+          <div data-pref="茨城県" data-center="36.3414,140.4468" data-radius="90000" data-zoom="9"></div>
+          <div data-pref="栃木県" data-center="36.5658,139.8836" data-radius="80000" data-zoom="9"></div>
+          <div data-pref="群馬県" data-center="36.3907,139.0604" data-radius="90000" data-zoom="9"></div>
+          <div data-pref="埼玉県" data-center="35.8617,139.6455" data-radius="80000" data-zoom="9"></div>
+          <div data-pref="千葉県" data-center="35.6051,140.1233" data-radius="90000" data-zoom="9"></div>
+        </div>
+      </div>
+
+
       <!-- タグフィルタ（自動生成） -->
       <div class="tagbar" id="tagBar" aria-label="タグで絞り込み"></div>
       <div style="text-align:center; margin:-4px 0 4px;">

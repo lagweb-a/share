@@ -25,14 +25,15 @@ function normalizeSpot(raw, idx) {
   // 価格は必要に応じて拡張可能（現状は学割UIなしなので固定で unavailable）
   return {
     id,
-    name: raw.name || '',
+    name: raw.name || '',     // ← 
     lat,
     lon,
     desc: raw.description || '',
     tags,
     address: raw.address || '',
     url: raw.url || '',
-    thumb: raw.image_url || '',     // ← カード画像で利用
+    thumb: raw.image_url, //カード画像で利用
+    
     // 学割フラグ：データ列が無いのでUI上はオフにしておく
     student: { available:false }
   };
@@ -40,17 +41,95 @@ function normalizeSpot(raw, idx) {
 
 
 
-/* ===== 地理ツリー（外部JSONをロード） ===== */
-let GEO_TREE = null;   // 全国ツリー
-let GEO_READY = false; // ロード完了フラグ
+/* ===== 地理ツリー（HTMLデータを解析） ===== */
+let GEO_TREE = {
+  '関東': {
+    center:[35.68,139.76], radius:180000, zoom:8,
+    prefs:{
+      '神奈川県':{
+        center:[35.4478,139.6425], radius:65000, zoom:10,
+        cities:{
+          '横浜市': { center:[35.4478,139.6425], radius:18000, zoom:13 },
+          '川崎市': { center:[35.5308,139.7036], radius:14000, zoom:13 },
+          '鎌倉市': { center:[35.3192,139.5467], radius: 9000, zoom:13 }
+        }
+      },
+      '東京都':{
+        center:[35.6762,139.6503], radius:50000, zoom:10,
+        cities:{
+          '千代田区':{ center:[35.6938,139.7530], radius:3000, zoom:13 },
+          '新宿区':  { center:[35.6938,139.7034], radius:4000, zoom:13 }
+        }
+      }
+    }
+  }};
+let GEO_READY = false;
 
-async function loadGeoTree(){
+const parseNumber = value => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+const parsePair = value => {
+  if (typeof value !== 'string') return null;
+  const arr = value.split(',').map(s => Number(s.trim())).filter(n => !Number.isNaN(n));
+  return arr.length === 2 ? arr : null;
+};
+const parseBBox = value => {
+  if (typeof value !== 'string') return null;
+  const arr = value.split(',').map(s => Number(s.trim())).filter(n => !Number.isNaN(n));
+  return arr.length === 4 ? arr : null;
+};
+
+function parseGeoData(rootEl){
+  const tree = {};
+  if (!rootEl) return tree;
+  const regionNodes = Array.from(rootEl.children).filter(el => el.dataset?.region);
+  regionNodes.forEach(regionEl => {
+    const regionKey = regionEl.dataset.region;
+    if (!regionKey) return;
+    const region = {
+      center: parsePair(regionEl.dataset.center),
+      radius: parseNumber(regionEl.dataset.radius),
+      zoom: parseNumber(regionEl.dataset.zoom),
+      bbox: parseBBox(regionEl.dataset.bbox),
+      prefs: {}
+    };
+    tree[regionKey] = region;
+    const prefNodes = Array.from(regionEl.children).filter(el => el.dataset?.pref);
+    prefNodes.forEach(prefEl => {
+      const prefKey = prefEl.dataset.pref;
+      if (!prefKey) return;
+      const pref = {
+        center: parsePair(prefEl.dataset.center),
+        radius: parseNumber(prefEl.dataset.radius),
+        zoom: parseNumber(prefEl.dataset.zoom),
+        bbox: parseBBox(prefEl.dataset.bbox),
+        cities: {}
+      };
+      region.prefs[prefKey] = pref;
+      const cityNodes = Array.from(prefEl.children).filter(el => el.dataset?.city);
+      cityNodes.forEach(cityEl => {
+        const cityKey = cityEl.dataset.city;
+        if (!cityKey) return;
+        pref.cities[cityKey] = {
+          center: parsePair(cityEl.dataset.center),
+          radius: parseNumber(cityEl.dataset.radius),
+          zoom: parseNumber(cityEl.dataset.zoom),
+          bbox: parseBBox(cityEl.dataset.bbox)
+        };
+      });
+    });
+  });
+  return tree;
+}
+
+function loadGeoTree(){
   try{
-    // 生成した GEO_TREE.json を同階層に置く（必要ならパス変更）
-    const res = await fetch('/templates/GEO_TREE.sample.json', { cache: 'force-cache' });
-    if (!res.ok) throw new Error('GEO_TREE.json を取得できませんでした');
-    GEO_TREE = await res.json();
-    GEO_READY = true;
+    const root = document.getElementById('geoData');
+    if (!root) throw new Error('geoData element not found');
+    GEO_TREE = parseGeoData(root);
+    GEO_READY = Object.keys(GEO_TREE).length > 0;
+    if (!GEO_READY) throw new Error('地域データが空です');
     populateRegions();
   }catch(err){
     console.error(err);
@@ -60,7 +139,9 @@ async function loadGeoTree(){
 
 /* 地方セレクトを動的生成 */
 function populateRegions(){
+  if (!GEO_READY) return;
   const regionSelect = document.getElementById('regionSelect');
+  if (!regionSelect) return;
   regionSelect.innerHTML = '<option value="">地方（選択）</option>';
   Object.keys(GEO_TREE).forEach(r=>{
     const opt = document.createElement('option');
@@ -68,10 +149,16 @@ function populateRegions(){
     regionSelect.appendChild(opt);
   });
   // 初期化
-  document.getElementById('prefSelect').innerHTML = '<option value="">都道府県（まず地方を選択）</option>';
-  document.getElementById('prefSelect').disabled = true;
-  document.getElementById('citySelect').innerHTML = '<option value="">市区町村（まず都道府県を選択）</option>';
-  document.getElementById('citySelect').disabled = true;
+  const prefSelectEl = document.getElementById('prefSelect');
+  const citySelectEl = document.getElementById('citySelect');
+  if (prefSelectEl){
+    prefSelectEl.innerHTML = '<option value="">都道府県（まず地方を選択）</option>';
+    prefSelectEl.disabled = true;
+  }
+  if (citySelectEl){
+    citySelectEl.innerHTML = '<option value="">市区町村（まず都道府県を選択）</option>';
+    citySelectEl.disabled = true;
+  }
 }
 
 /* ===== 便利関数 ===== */
@@ -110,7 +197,7 @@ const defaultCenter=[35.4478,139.6425], defaultZoom=13;
 const markerPool = new Map();
 
 /* 地理スコープ円 */
-let geoScope = { level:null, key:null, center:null, radius:null, zoom:null, bbox:null };
+let geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
 let geoCircle = null;
 
 /* タグフィルタ */
@@ -193,19 +280,20 @@ function populateCities(regionKey, prefKey){
 function setGeoScopeByUI(){
   const regionKey = regionSelect.value || null;
   const prefKey   = prefSelect.value   || null;
-  const cityKey   = citySelect.value   || null;
+  const rawCity   = citySelect.value   || null;
+  const cityKey   = rawCity && rawCity !== '全域' ? rawCity : null;
 
   if (cityKey && regionKey && prefKey){
-    const c = GEO_TREE[regionKey].prefs[prefKey].cities[cityKey];
-    geoScope = { level:'city', key:cityKey, center:c.center, radius:c.radius, zoom:c.zoom||13, bbox:c.bbox||null };
+     const c = ((GEO_TREE[regionKey]||{}).prefs?.[prefKey]?.cities||{})[cityKey] || {};
+    geoScope = { level:'city', key:cityKey, prefKey, cityKey, center:c.center||null, radius:c.radius||null, zoom:c.zoom||13, bbox:c.bbox||null };
   } else if (prefKey && regionKey){
-    const p = GEO_TREE[regionKey].prefs[prefKey];
-    geoScope = { level:'pref', key:prefKey, center:p.center, radius:p.radius, zoom:p.zoom||10, bbox:p.bbox||null };
+    const p = ((GEO_TREE[regionKey]||{}).prefs||{})[prefKey] || {};
+    geoScope = { level:'pref', key:prefKey, prefKey, cityKey:null, center:p.center||null, radius:p.radius||null, zoom:p.zoom||10, bbox:p.bbox||null };
   } else if (regionKey){
-    const r = GEO_TREE[regionKey];
-    geoScope = { level:'region', key:regionKey, center:r.center, radius:r.radius, zoom:r.zoom||8, bbox:r.bbox||null };
+    const r = GEO_TREE[regionKey] || {};
+    geoScope = { level:'region', key:regionKey, prefKey:null, cityKey:null, center:r.center||null, radius:r.radius||null, zoom:r.zoom||8, bbox:r.bbox||null };
   } else {
-    geoScope = { level:null, key:null, center:null, radius:null, zoom:null, bbox:null };
+    geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
   }
   drawGeoCircle(); applyFilters();
 }
@@ -227,7 +315,7 @@ function drawGeoCircle(){
 document.getElementById('clearGeo').addEventListener('click', ()=>{
   regionSelect.value=''; prefSelect.innerHTML='<option value="">都道府県（まず地方を選択）</option>'; prefSelect.disabled=true;
   citySelect.innerHTML='<option value="">市区町村（まず都道府県を選択）</option>'; citySelect.disabled=true;
-  geoScope = { level:null, key:null, center:null, radius:null, zoom:null, bbox:null };
+  geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
   if (geoCircle){ geoCircle.remove(); geoCircle=null; }
   applyFilters();
 });
@@ -300,6 +388,18 @@ function filterPlaces(query, opts){
   const ts=tokens(query); let arr=PLACES.slice();
   // 地域→円/四角→表示範囲→タグ→テキスト→学割→お気に入り→距離順
   arr = arr.filter(p=> inGeoScope(p.lat,p.lon));
+  if (geoScope.prefKey){
+    arr = arr.filter(p => {
+      if (p.pref === geoScope.prefKey) return true;
+      return (p.address || '').includes(geoScope.prefKey);
+    });
+  }
+  if (geoScope.cityKey){
+    arr = arr.filter(p => {
+      if (p.city === geoScope.cityKey) return true;
+      return (p.address || '').includes(geoScope.cityKey);
+    });
+  }
   arr = arr.filter(p=> inSelection(p.lat,p.lon));
   if (opts.boundsOnly){ const b=map.getBounds(); arr=arr.filter(p=>b.contains([p.lat,p.lon])); }
   if (selectedTags.size){ arr = arr.filter(p => (p.tags||[]).some(t => selectedTags.has(t))); }
@@ -370,9 +470,11 @@ function render(list){
 
   const statEl=document.getElementById('stat');
   if (statEl){
+    const label = geoScope.cityKey || geoScope.prefKey || geoScope.key;
+    const level = geoScope.cityKey ? 'city' : (geoScope.prefKey ? 'pref' : geoScope.level);
     const stat = (selectionLayer instanceof L.Circle)   ? `選択範囲：円（半径 約 ${document.getElementById('radius')?.value||'-'} m）`
                : (selectionLayer instanceof L.Rectangle)? '選択範囲：四角（Shift+ドラッグで変更）'
-               : (geoScope.level ? `地域：${geoScope.key}（${geoScope.level}）` : '選択範囲：なし（地図をタップ / Shift+ドラッグ）');
+               : (label ? `地域：${label}（${level||'region'}）` : '選択範囲：なし（地図をタップ / Shift+ドラッグ）');
     statEl.textContent = stat;
   }
 }
@@ -553,7 +655,7 @@ document.getElementById('resetBtn')?.addEventListener('click', ()=>{
   if (selectionLayer){ selectionLayer.remove(); selectionLayer=null; }
   if (centerDot){ centerDot.remove(); centerDot=null; }
   if (geoCircle){ geoCircle.remove(); geoCircle=null; }
-  geoScope = { level:null, key:null, center:null, radius:null, zoom:null, bbox:null };
+  geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
   regionSelect.value=''; prefSelect.innerHTML='<option value="">都道府県（まず地方を選択）</option>'; prefSelect.disabled=true;
   citySelect.innerHTML='<option value="">市区町村（まず都道府県を選択）</option>'; citySelect.disabled=true;
   selectedId=null; currentLoc=null; const gs=document.getElementById('geoStatus'); if(gs) gs.textContent='';
