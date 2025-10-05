@@ -1,13 +1,19 @@
-/* ===== データ（横浜サンプル） ===== */
-let PLACES = [
-
-];
+/* ===== データロード ===== */
+let PLACES = [];
+let GEO_TREE = {};
+let GEO_READY = false;
 
 // Flask の /api/spots からJSONを取得
 async function fetchSpots(params = {}) {
   const usp = new URLSearchParams(params);
   const res = await fetch(`/api/spots?${usp.toString()}`);
-  if (!res.ok) throw new Error('APIエラー');
+  if (!res.ok) throw new Error('スポットデータの取得に失敗しました');
+  return res.json();
+}
+
+async function fetchGeoTree() {
+  const res = await fetch('/api/geo');
+  if (!res.ok) throw new Error('地域データの取得に失敗しました');
   return res.json();
 }
 
@@ -16,6 +22,7 @@ function normalizeSpot(raw, idx) {
   const id  = raw.id ?? String(idx);
   const lat = (raw.lat !== '' && raw.lat != null && !isNaN(Number(raw.lat))) ? Number(raw.lat) : null;
   const lon = (raw.lon !== '' && raw.lon != null && !isNaN(Number(raw.lon))) ? Number(raw.lon) : null;
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lon);
 
   // "横浜|赤レンガ|イベント" → ["横浜","赤レンガ","イベント"]
   const tags = typeof raw.tags === 'string'
@@ -28,122 +35,27 @@ function normalizeSpot(raw, idx) {
     name: raw.name || '',     // ← 
     lat,
     lon,
+    hasCoords,
     desc: raw.description || '',
     tags,
     address: raw.address || '',
     url: raw.url || '',
-    thumb: raw.image_url, //カード画像で利用
+    thumb: raw.image_url,
+    region: raw.region || '',
+    pref: raw.prefecture || raw.pref || '',
+    city: raw.city || '',
     
     // 学割フラグ：データ列が無いのでUI上はオフにしておく
     student: { available:false }
   };
 }
 
-
-
-/* ===== 地理ツリー（HTMLデータを解析） ===== */
-let GEO_TREE = {
-  '関東': {
-    center:[35.68,139.76], radius:180000, zoom:8,
-    prefs:{
-      '神奈川県':{
-        center:[35.4478,139.6425], radius:65000, zoom:10,
-        cities:{
-          '横浜市': { center:[35.4478,139.6425], radius:18000, zoom:13 },
-          '川崎市': { center:[35.5308,139.7036], radius:14000, zoom:13 },
-          '鎌倉市': { center:[35.3192,139.5467], radius: 9000, zoom:13 }
-        }
-      },
-      '東京都':{
-        center:[35.6762,139.6503], radius:50000, zoom:10,
-        cities:{
-          '千代田区':{ center:[35.6938,139.7530], radius:3000, zoom:13 },
-          '新宿区':  { center:[35.6938,139.7034], radius:4000, zoom:13 }
-        }
-      }
-    }
-  }};
-let GEO_READY = false;
-
-const parseNumber = value => {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-};
-const parsePair = value => {
-  if (typeof value !== 'string') return null;
-  const arr = value.split(',').map(s => Number(s.trim())).filter(n => !Number.isNaN(n));
-  return arr.length === 2 ? arr : null;
-};
-const parseBBox = value => {
-  if (typeof value !== 'string') return null;
-  const arr = value.split(',').map(s => Number(s.trim())).filter(n => !Number.isNaN(n));
-  return arr.length === 4 ? arr : null;
-};
-
-function parseGeoData(rootEl){
-  const tree = {};
-  if (!rootEl) return tree;
-  const regionNodes = Array.from(rootEl.children).filter(el => el.dataset?.region);
-  regionNodes.forEach(regionEl => {
-    const regionKey = regionEl.dataset.region;
-    if (!regionKey) return;
-    const region = {
-      center: parsePair(regionEl.dataset.center),
-      radius: parseNumber(regionEl.dataset.radius),
-      zoom: parseNumber(regionEl.dataset.zoom),
-      bbox: parseBBox(regionEl.dataset.bbox),
-      prefs: {}
-    };
-    tree[regionKey] = region;
-    const prefNodes = Array.from(regionEl.children).filter(el => el.dataset?.pref);
-    prefNodes.forEach(prefEl => {
-      const prefKey = prefEl.dataset.pref;
-      if (!prefKey) return;
-      const pref = {
-        center: parsePair(prefEl.dataset.center),
-        radius: parseNumber(prefEl.dataset.radius),
-        zoom: parseNumber(prefEl.dataset.zoom),
-        bbox: parseBBox(prefEl.dataset.bbox),
-        cities: {}
-      };
-      region.prefs[prefKey] = pref;
-      const cityNodes = Array.from(prefEl.children).filter(el => el.dataset?.city);
-      cityNodes.forEach(cityEl => {
-        const cityKey = cityEl.dataset.city;
-        if (!cityKey) return;
-        pref.cities[cityKey] = {
-          center: parsePair(cityEl.dataset.center),
-          radius: parseNumber(cityEl.dataset.radius),
-          zoom: parseNumber(cityEl.dataset.zoom),
-          bbox: parseBBox(cityEl.dataset.bbox)
-        };
-      });
-    });
-  });
-  return tree;
-}
-
-function loadGeoTree(){
-  try{
-    const root = document.getElementById('geoData');
-    if (!root) throw new Error('geoData element not found');
-    GEO_TREE = parseGeoData(root);
-    GEO_READY = Object.keys(GEO_TREE).length > 0;
-    if (!GEO_READY) throw new Error('地域データが空です');
-    populateRegions();
-  }catch(err){
-    console.error(err);
-    showToast('地域データの読込に失敗しました');
-  }
-}
-
-/* 地方セレクトを動的生成 */
 function populateRegions(){
   if (!GEO_READY) return;
   const regionSelect = document.getElementById('regionSelect');
   if (!regionSelect) return;
   regionSelect.innerHTML = '<option value="">地方（選択）</option>';
-  Object.keys(GEO_TREE).forEach(r=>{
+  Object.keys(GEO_TREE).sort((a,b)=>a.localeCompare(b,'ja')).forEach(r=>{
     const opt = document.createElement('option');
     opt.value = r; opt.textContent = r;
     regionSelect.appendChild(opt);
@@ -161,14 +73,99 @@ function populateRegions(){
   }
 }
 
+const regionSelect = document.getElementById('regionSelect');
+const prefSelect   = document.getElementById('prefSelect');
+const citySelect   = document.getElementById('citySelect');
+
+function populatePrefs(regionKey){
+  if (!GEO_READY) return;
+  prefSelect.innerHTML = '<option value="">都道府県（まず地方を選択）</option>';
+  citySelect.innerHTML = '<option value="">市区町村（まず都道府県を選択）</option>';
+  citySelect.disabled = true;
+  const region = GEO_TREE[regionKey];
+  if (!region){ prefSelect.disabled = true; return; }
+  Object.keys(region.prefs || {}).sort((a,b)=>a.localeCompare(b,'ja')).forEach(pk=>{
+    const opt=document.createElement('option'); opt.value=pk; opt.textContent=pk; prefSelect.appendChild(opt);
+  });
+  prefSelect.disabled = false;
+}
+function populateCities(regionKey, prefKey){
+  if (!GEO_READY) return;
+  citySelect.innerHTML = '<option value="">市区町村（任意）</option>';
+  const pref = GEO_TREE[regionKey]?.prefs?.[prefKey];
+  if (!pref){ citySelect.disabled = true; return; }
+  const cityKeys = Object.keys(pref.cities||{}).sort((a,b)=>a.localeCompare(b,'ja'));
+  if (cityKeys.length){
+    const optAll = document.createElement('option');
+    optAll.value = '全域';
+    optAll.textContent = '全域';
+    citySelect.appendChild(optAll);
+  }
+  cityKeys.forEach(ck=>{
+    const opt=document.createElement('option'); opt.value=ck; opt.textContent=ck; citySelect.appendChild(opt);
+  });
+  citySelect.disabled = false;
+}
+
+let geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
+let geoCircle = null;
+
+function setGeoScopeByUI(){
+  const regionKey = regionSelect?.value || null;
+  const prefKey   = prefSelect?.value   || null;
+  const rawCity   = citySelect?.value   || null;
+  const cityKey   = rawCity && rawCity !== '全域' ? rawCity : null;
+
+  if (cityKey && regionKey && prefKey){
+    const c = ((GEO_TREE[regionKey]||{}).prefs?.[prefKey]?.cities||{})[cityKey] || {};
+    geoScope = { level:'city', key:cityKey, prefKey, cityKey, center:c.center||null, radius:c.radius||null, zoom:c.zoom||13, bbox:c.bbox||null };
+  } else if (prefKey && regionKey){
+    const p = ((GEO_TREE[regionKey]||{}).prefs||{})[prefKey] || {};
+    geoScope = { level:'pref', key:prefKey, prefKey, cityKey:null, center:p.center||null, radius:p.radius||null, zoom:p.zoom||10, bbox:p.bbox||null };
+  } else if (regionKey){
+    const r = GEO_TREE[regionKey] || {};
+    geoScope = { level:'region', key:regionKey, prefKey:null, cityKey:null, center:r.center||null, radius:r.radius||null, zoom:r.zoom||6, bbox:r.bbox||null };
+  } else {
+    geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
+  }
+  drawGeoCircle(); applyFilters();
+}
+
+function drawGeoCircle(){
+  if (!map) return;
+  if (geoCircle){ geoCircle.remove(); geoCircle=null; }
+  if (geoScope.bbox && Array.isArray(geoScope.bbox) && geoScope.bbox.length===4){
+    const [minLon,minLat,maxLon,maxLat] = geoScope.bbox;
+    const bounds = L.latLngBounds([ [minLat,minLon], [maxLat,maxLon] ]);
+    map.fitBounds(bounds, { padding: [24,24] });
+  } else if (geoScope.center && geoScope.zoom){
+    map.setView(geoScope.center, geoScope.zoom);
+  }
+  if (geoScope.center && geoScope.radius){
+    geoCircle = L.circle(geoScope.center, { radius:geoScope.radius, color:'#3b82f6', weight:2, dashArray:'6 6', fillColor:'#3b82f6', fillOpacity:.06 }).addTo(map);
+  }
+}
+
+document.getElementById('clearGeo')?.addEventListener('click', ()=>{
+  if (regionSelect) regionSelect.value='';
+  if (prefSelect){ prefSelect.innerHTML='<option value="">都道府県（まず地方を選択）</option>'; prefSelect.disabled=true; }
+  if (citySelect){ citySelect.innerHTML='<option value="">市区町村（まず都道府県を選択）</option>'; citySelect.disabled=true; }
+  geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
+  if (geoCircle){ geoCircle.remove(); geoCircle=null; }
+  applyFilters();
+});
+regionSelect?.addEventListener('change', ()=>{ populatePrefs(regionSelect.value); setGeoScopeByUI(); });
+prefSelect?.addEventListener('change',  ()=>{ populateCities(regionSelect.value, prefSelect.value); setGeoScopeByUI(); });
+citySelect?.addEventListener('change',  ()=> setGeoScopeByUI());
+
 /* ===== 便利関数 ===== */
 const fmt = n => new Intl.NumberFormat('ja-JP').format(n);
 const fmt1= n => new Intl.NumberFormat('ja-JP',{maximumFractionDigits:1}).format(n);
 const yen = v => v==null ? '—' : `¥${fmt(v)}`;
 const norm= s => (s||'').toString().trim().toLowerCase();
 const tokens=q => norm(q).split(/\s+/).filter(Boolean);
-const gmapLink = (lat, lon)=>`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
-const gmapEmbed = (lat, lon, z=16)=>`https://www.google.com/maps?q=${lat},${lon}&z=${z}&hl=ja&output=embed`;
+const gmapLink = (lat, lon)=> lat!=null && lon!=null ? `https://www.google.com/maps/search/?api=1&query=${lat},${lon}` : '#';
+const gmapEmbed = (lat, lon, z=16)=> lat!=null && lon!=null ? `https://www.google.com/maps?q=${lat},${lon}&z=${z}&hl=ja&output=embed` : '';
 const R=6371; const haversineKm=(a,b)=>{const r=x=>x*Math.PI/180;const dLat=r(b[0]-a[0]),dLon=r(b[1]-a[1]),la1=r(a[0]),la2=r(b[0]);const h=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(h));};
 const showToast=m=>{const t=document.getElementById('toast'); if(!t) return; t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1500);};
 const starHTML=(n,max=5)=>{ n=Math.max(0,Math.min(max,Math.round(n))); return '<span class="stars">'+Array.from({length:max},(_,i)=>`<span class="star ${i<n?'filled':''}">★</span>`).join('')+'</span>'; };
@@ -193,17 +190,10 @@ function avgRating(placeId){ const arr=getComments(placeId); if(!arr.length) ret
 
 /* ===== 地図・マーカー ===== */
 let map, cluster, selectionLayer=null, centerDot=null, currentLoc=null, selectedId=null;
-const defaultCenter=[35.4478,139.6425], defaultZoom=13;
+const defaultCenter=[36.2048,138.2529], defaultZoom=5;
 const markerPool = new Map();
 
-/* 地理スコープ円 */
-let geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
-let geoCircle = null;
 
-/* タグフィルタ */
-const selectedTags = new Set();
-
-/* ===== 初期化 ===== */
 function initMap(){
   map = L.map('map', { boxZoom:true }).setView(defaultCenter, defaultZoom);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OpenStreetMap contributors' }).addTo(map);
@@ -211,13 +201,13 @@ function initMap(){
   cluster = L.markerClusterGroup();
   map.addLayer(cluster);
 
-  PLACES.forEach(p=>{
+  PLACES.filter(p=>p.hasCoords).forEach(p=>{
     const m = L.marker([p.lat,p.lon]);
     m.bindPopup(`<strong>${p.name}</strong><br>${p.desc||''}`);
     m.on('click', ()=>{ selectedId=p.id; highlightSelected(); openPanelFor(p); });
     markerPool.set(p.id, m);
   });
-  syncMarkers(new Set(PLACES.map(p=>p.id)));
+  syncMarkers(new Set(PLACES.filter(p=>p.hasCoords).map(p=>p.id)));
 
   // タップ＝円
   map.on('click', (e)=> placeCircleAt(e.latlng));
@@ -242,104 +232,13 @@ function placeCircleAt(latlng){
 }
 
 function syncMarkers(keepIds){
+  if (!cluster) return;
   const current = new Set();
   cluster.eachLayer(l=>{
     for (const [id, mk] of markerPool) if (mk===l){ current.add(id); break; }
   });
   for (const id of keepIds){ if (!current.has(id)) { const mk=markerPool.get(id); if (mk) cluster.addLayer(mk); } }
   for (const id of current){ if (!keepIds.has(id)) { const mk=markerPool.get(id); if (mk) cluster.removeLayer(mk); } }
-}
-
-/* ===== カスケードUI ===== */
-const regionSelect = document.getElementById('regionSelect');
-const prefSelect   = document.getElementById('prefSelect');
-const citySelect   = document.getElementById('citySelect');
-
-function populatePrefs(regionKey){
-  if (!GEO_READY) return;
-  prefSelect.innerHTML = '<option value="">都道府県（まず地方を選択）</option>';
-  citySelect.innerHTML = '<option value="">市区町村（まず都道府県を選択）</option>';
-  citySelect.disabled = true;
-  const region = GEO_TREE[regionKey];
-  if (!region){ prefSelect.disabled = true; return; }
-  Object.keys(region.prefs).forEach(pk=>{
-    const opt=document.createElement('option'); opt.value=pk; opt.textContent=pk; prefSelect.appendChild(opt);
-  });
-  prefSelect.disabled = false;
-}
-function populateCities(regionKey, prefKey){
-  if (!GEO_READY) return;
-  citySelect.innerHTML = '<option value="">市区町村（任意）</option>';
-  const pref = GEO_TREE[regionKey]?.prefs?.[prefKey];
-  if (!pref){ citySelect.disabled = true; return; }
-  Object.keys(pref.cities||{}).forEach(ck=>{
-    const opt=document.createElement('option'); opt.value=ck; opt.textContent=ck; citySelect.appendChild(opt);
-  });
-  citySelect.disabled = false;
-}
-function setGeoScopeByUI(){
-  const regionKey = regionSelect.value || null;
-  const prefKey   = prefSelect.value   || null;
-  const rawCity   = citySelect.value   || null;
-  const cityKey   = rawCity && rawCity !== '全域' ? rawCity : null;
-
-  if (cityKey && regionKey && prefKey){
-     const c = ((GEO_TREE[regionKey]||{}).prefs?.[prefKey]?.cities||{})[cityKey] || {};
-    geoScope = { level:'city', key:cityKey, prefKey, cityKey, center:c.center||null, radius:c.radius||null, zoom:c.zoom||13, bbox:c.bbox||null };
-  } else if (prefKey && regionKey){
-    const p = ((GEO_TREE[regionKey]||{}).prefs||{})[prefKey] || {};
-    geoScope = { level:'pref', key:prefKey, prefKey, cityKey:null, center:p.center||null, radius:p.radius||null, zoom:p.zoom||10, bbox:p.bbox||null };
-  } else if (regionKey){
-    const r = GEO_TREE[regionKey] || {};
-    geoScope = { level:'region', key:regionKey, prefKey:null, cityKey:null, center:r.center||null, radius:r.radius||null, zoom:r.zoom||8, bbox:r.bbox||null };
-  } else {
-    geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
-  }
-  drawGeoCircle(); applyFilters();
-}
-function drawGeoCircle(){
-  if (geoCircle){ geoCircle.remove(); geoCircle=null; }
-  // bboxがあればfitBoundsを優先
-  if (geoScope.bbox && Array.isArray(geoScope.bbox) && geoScope.bbox.length===4){
-    const [minLon,minLat,maxLon,maxLat] = geoScope.bbox;
-    const bounds = L.latLngBounds([ [minLat,minLon], [maxLat,maxLon] ]);
-    map.fitBounds(bounds, { padding: [24,24] });
-  } else if (geoScope.center && geoScope.zoom){
-    map.setView(geoScope.center, geoScope.zoom);
-  }
-  // ガイドとして円も描く（半径があるとき）
-  if (geoScope.center && geoScope.radius){
-    geoCircle = L.circle(geoScope.center, { radius:geoScope.radius, color:'#3b82f6', weight:2, dashArray:'6 6', fillColor:'#3b82f6', fillOpacity:.06 }).addTo(map);
-  }
-}
-document.getElementById('clearGeo').addEventListener('click', ()=>{
-  regionSelect.value=''; prefSelect.innerHTML='<option value="">都道府県（まず地方を選択）</option>'; prefSelect.disabled=true;
-  citySelect.innerHTML='<option value="">市区町村（まず都道府県を選択）</option>'; citySelect.disabled=true;
-  geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
-  if (geoCircle){ geoCircle.remove(); geoCircle=null; }
-  applyFilters();
-});
-regionSelect.addEventListener('change', ()=>{ populatePrefs(regionSelect.value); setGeoScopeByUI(); });
-prefSelect.addEventListener('change',  ()=>{ populateCities(regionSelect.value, prefSelect.value); setGeoScopeByUI(); });
-citySelect.addEventListener('change',  ()=> setGeoScopeByUI());
-
-/* ===== 円UI ===== */
-const radiusInput=document.getElementById('radius'), radiusVal=document.getElementById('radiusVal');
-if (radiusInput && radiusVal){
-  radiusInput.addEventListener('input', ()=>{
-    radiusVal.textContent=`${radiusInput.value}m`;
-    document.querySelectorAll('.pill').forEach(p=> p.classList.toggle('active', +p.dataset.r===+radiusInput.value));
-    if (selectionLayer instanceof L.Circle){ selectionLayer.setRadius(+radiusInput.value); applyFilters(); }
-  });
-  document.querySelectorAll('.pill').forEach(p=>{
-    p.addEventListener('click', ()=>{ radiusInput.value=p.dataset.r; radiusInput.dispatchEvent(new Event('input')); });
-  });
-  document.getElementById('centerHere')?.addEventListener('click', ()=>{
-    if (!currentLoc){ showToast('まず「現在地」を取得してください'); return; }
-    placeCircleAt(L.latLng(currentLoc.lat, currentLoc.lon));
-  });
-  radiusInput.addEventListener('touchstart', ()=> map.dragging.disable());
-  radiusInput.addEventListener('touchend',   ()=> map.dragging.enable());
 }
 
 /* ===== タグバー ===== */
@@ -371,9 +270,11 @@ document.getElementById('clearTags')?.addEventListener('click', ()=>{
   document.querySelectorAll('#tagBar .tagchip').forEach(b=> b.classList.remove('active'));
   applyFilters();
 });
+const selectedTags = new Set();
 
 /* ===== 絞り込み ===== */
 function inSelection(lat,lon){
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
   if (!selectionLayer) return true;
   const ll = L.latLng(lat,lon);
   if (selectionLayer instanceof L.Circle)   return ll.distanceTo(selectionLayer.getLatLng()) <= selectionLayer.getRadius();
@@ -381,6 +282,7 @@ function inSelection(lat,lon){
   return true;
 }
 function inGeoScope(lat,lon){
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
   if (!geoScope.center || !geoScope.radius) return true;
   return L.latLng(lat,lon).distanceTo(L.latLng(geoScope.center[0], geoScope.center[1])) <= geoScope.radius;
 }
@@ -388,6 +290,9 @@ function filterPlaces(query, opts){
   const ts=tokens(query); let arr=PLACES.slice();
   // 地域→円/四角→表示範囲→タグ→テキスト→学割→お気に入り→距離順
   arr = arr.filter(p=> inGeoScope(p.lat,p.lon));
+  if (geoScope.level === 'region' && geoScope.key){
+    arr = arr.filter(p => p.region === geoScope.key);
+  }
   if (geoScope.prefKey){
     arr = arr.filter(p => {
       if (p.pref === geoScope.prefKey) return true;
@@ -401,7 +306,10 @@ function filterPlaces(query, opts){
     });
   }
   arr = arr.filter(p=> inSelection(p.lat,p.lon));
-  if (opts.boundsOnly){ const b=map.getBounds(); arr=arr.filter(p=>b.contains([p.lat,p.lon])); }
+  if (opts.boundsOnly){
+    const b=map.getBounds();
+    arr=arr.filter(p=> p.hasCoords && b.contains([p.lat,p.lon]));
+  }
   if (selectedTags.size){ arr = arr.filter(p => (p.tags||[]).some(t => selectedTags.has(t))); }
   if (ts.length){
     arr=arr.filter(p=>{
@@ -412,7 +320,7 @@ function filterPlaces(query, opts){
   if (opts.onlyDiscount) arr=arr.filter(p=>p.student?.available);
   if (opts.onlyFavs)     arr=arr.filter(p=> isFav(p.id));
   if (opts.sortByDistance && currentLoc){
-    arr.forEach(p=>p._d=haversineKm([currentLoc.lat,currentLoc.lon],[p.lat,p.lon]));
+    arr.forEach(p=>p._d=p.hasCoords ? haversineKm([currentLoc.lat,currentLoc.lon],[p.lat,p.lon]) : Infinity);
     arr.sort((a,b)=>(a._d||1e9)-(b._d||1e9));
   } else arr.forEach(p=>delete p._d);
   return arr;
@@ -446,13 +354,14 @@ function render(list){
         <div class="row">${(p.tags||[]).map(t=>`<span class="tag">${t}</span>`).join(' ')} ${price||''}</div>
         <div class="row" style="margin-top:6px">
           <button type="button" class="btn primary" data-action="detail">詳細（地図/口コミ/★）</button>
-          <button type="button" class="btn" data-action="map">地図で見る</button>
-          <a class="btn" href="${gmapLink(p.lat,p.lon)}" target="_blank" rel="noopener">Googleで開く</a>
+          ${p.hasCoords ? '<button type="button" class="btn" data-action="map">地図で見る</button>' : '<span class="muted">位置情報なし</span>'}
+          ${p.hasCoords ? `<a class="btn" href="${gmapLink(p.lat,p.lon)}" target="_blank" rel="noopener">Googleで開く</a>` : ''}
           <button type="button" class="btn fav-btn ${isFav(p.id)?'active':''}" data-action="fav">${isFav(p.id)?'♥':'♡'} お気に入り</button>
-          ${p._d!=null?`<small class="muted">／ 約 ${fmt1(p._d)} km</small>`:''}
+           ${p._d!=null && p._d !== Infinity?`<small class="muted">／ 約 ${fmt1(p._d)} km</small>`:''}
         </div>
       </div>`;
     card.querySelectorAll('[data-action="map"]').forEach(b=> b.addEventListener('click', ()=>{
+      if (!p.hasCoords) return;
       map.setView([p.lat,p.lon],16);
       const mk=markerPool.get(p.id); if (mk){ mk.openPopup(); }
       selectedId=p.id; highlightSelected();
@@ -465,7 +374,7 @@ function render(list){
     listEl.appendChild(card);
   });
 
-  const keep = new Set(list.map(p=>p.id));
+  const keep = new Set(list.filter(p=>p.hasCoords).map(p=>p.id));
   syncMarkers(keep);
 
   const statEl=document.getElementById('stat');
@@ -496,7 +405,7 @@ function locate(){
   navigator.geolocation.getCurrentPosition(pos=>{
     currentLoc={lat:pos.coords.latitude, lon:pos.coords.longitude};
     L.circleMarker([currentLoc.lat,currentLoc.lon]).addTo(map).bindPopup('現在地').openPopup();
-    map.setView([currentLoc.lat,currentLoc.lon],15);
+    map.setView([currentLoc.lat,currentLoc.lon],12);
     const gs=document.getElementById('geoStatus'); if(gs) gs.textContent=`現在地: ${currentLoc.lat.toFixed(4)}, ${currentLoc.lon.toFixed(4)}`;
     applyFilters();
   }, err=> showToast('位置エラー: '+err.message), {enableHighAccuracy:true, timeout:7000, maximumAge:60000});
@@ -519,46 +428,51 @@ function openPanelFor(p){
   const ratingInfo = avgRating(p.id);
   if (panelTitle) panelTitle.textContent = p.name;
 
-  // Googleマップ埋め込み＋リンク
-  const gEmbed = `<div class="map-embed"><iframe loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="${gmapEmbed(p.lat,p.lon,16)}" title="${p.name}の地図"></iframe><p><a class="link-on-dark" href="${gmapLink(p.lat,p.lon)}" target="_blank" rel="noopener">Googleマップで開く</a></p></div>`;
+  let mapSection = '';
+  if (p.hasCoords){
+    const embed = gmapEmbed(p.lat,p.lon,16);
+    mapSection = `<div class="map-embed"><iframe loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="${embed}" title="${p.name}の地図"></iframe><p><a class="link-on-dark" href="${gmapLink(p.lat,p.lon)}" target="_blank" rel="noopener">Googleマップで開く</a></p></div>`;
+  } else {
+    mapSection = '<p class="muted-on-dark">位置情報が登録されていません。</p>';
+  }
 
-  if (panelContent) panelContent.innerHTML = `
-    ${gEmbed}
-    <div class="comment-block">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <div>${starHTMLInline(ratingInfo.avg)}</div>
-        <span class="muted-on-dark">${ratingInfo.count? ratingInfo.avg.toFixed(1) : '—'} / 5 ・ ${ratingInfo.count}件</span>
+  if (panelContent){
+    panelContent.innerHTML = `
+      ${mapSection}
+      <div class="comment-block">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <div>${starHTMLInline(ratingInfo.avg)}</div>
+          <span class="muted-on-dark">${ratingInfo.count? ratingInfo.avg.toFixed(1) : '—'} / 5 ・ ${ratingInfo.count}件</span>
+          </div>
+        <p class="muted-on-dark" style="margin:.4em 0 0">${p.desc||''}</p>
+        <p>${(p.tags||[]).map(t=>`<span class="tag" style="background:#0b1220;color:#e5e7eb;border:1px solid #374151">${t}</span>`).join(' ')}</p>
+        ${p.student?.available ? `<p class="muted-on-dark"><strong>学割:</strong> 学生 ${yen(p.student.price?.student)}${p.student.price?.adult!=null?`／一般 ${yen(p.student.price.adult)}`:''}<br><small>${p.student.condition||''}</small></p>` : '<p class="muted-on-dark"><small>学割情報なし</small></p>'}
       </div>
-      <p class="muted-on-dark" style="margin:.4em 0 0">${p.desc||''}</p>
-      <p>${(p.tags||[]).map(t=>`<span class="tag" style="background:#0b1220;color:#e5e7eb;border:1px solid #374151">${t}</span>`).join(' ')}</p>
-      ${p.student?.available ? `<p class="muted-on-dark"><strong>学割:</strong> 学生 ${yen(p.student.price?.student)}${p.student.price?.adult!=null?`／一般 ${yen(p.student.price.adult)}`:''}<br><small>${p.student.condition||''}</small></p>` : '<p class="muted-on-dark"><small>学割情報なし</small></p>'}
-    </div>
 
-    <div>
-      <h4 style="margin:6px 0">口コミを投稿</h4>
-      <form id="panelCommentForm" class="comment-form">
-        <div class="rating-input" id="ratingInput" aria-label="星評価（1〜5）">
-          <button type="button" class="star-btn" data-v="1">★</button>
-          <button type="button" class="star-btn" data-v="2">★</button>
-          <button type="button" class="star-btn" data-v="3">★</button>
-          <button type="button" class="star-btn" data-v="4">★</button>
-          <button type="button" class="star-btn" data-v="5">★</button>
-          <span class="muted-on-dark">（タップで選択）</span>
-          <input type="hidden" id="ratingValue" value="0">
-        </div>
-        <input id="cName" type="text" placeholder="お名前（任意）">
-        <textarea id="cText" rows="3" placeholder="コメントを書く…"></textarea>
-        <button type="submit">投稿</button>
-      </form>
-    </div>
+      <div>
+        <h4 style="margin:6px 0">口コミを投稿</h4>
+        <form id="panelCommentForm" class="comment-form">
+          <div class="rating-input" id="ratingInput" aria-label="星評価（1〜5）">
+            <button type="button" class="star-btn" data-v="1">★</button>
+            <button type="button" class="star-btn" data-v="2">★</button>
+            <button type="button" class="star-btn" data-v="3">★</button>
+            <button type="button" class="star-btn" data-v="4">★</button>
+            <button type="button" class="star-btn" data-v="5">★</button>
+            <span class="muted-on-dark">（タップで選択）</span>
+            <input type="hidden" id="ratingValue" value="0">
+          </div>
+          <input id="cName" type="text" placeholder="お名前（任意)">
+          <textarea id="cText" rows="3" placeholder="コメントを書く…"></textarea>
+          <button type="submit">投稿</button>
+        </form>
+      </div>
 
-    <div>
-      <h4 style="margin:6px 0">みんなの口コミ</h4>
-      <div id="panelCommentList"></div>
-    </div>
-  `;
-
-  // お気に入りボタン（パネル）
+      <div>
+        <h4 style="margin:6px 0">みんなの口コミ</h4>
+        <div id="panelCommentList"></div>
+      </div>
+    `;
+  }
   updateFavInPanel(p.id);
   if (favInPanel) favInPanel.onclick = ()=>{ toggleFav(p.id); updateFavInPanel(p.id); applyFilters(); };
 
@@ -591,8 +505,23 @@ function openPanelFor(p){
 
   // 公式/学割ページへの導線（なければGoogleマップ）
   if (panelLink){
-    panelLink.href = p.student?.url || gmapLink(p.lat,p.lon);
-    panelLink.textContent = p.student?.url ? '学割/公式ページへ' : 'Googleマップを開く';
+    const preferredUrl = p.student?.url || p.url;
+    if (preferredUrl){
+      panelLink.href = preferredUrl;
+      panelLink.textContent = p.student?.url ? '学割/公式ページへ' : '公式ページへ';
+      panelLink.target = '_blank';
+      panelLink.rel = 'noopener';
+    } else if (p.hasCoords){
+      panelLink.href = gmapLink(p.lat,p.lon);
+      panelLink.textContent = 'Googleマップを開く';
+      panelLink.target = '_blank';
+      panelLink.rel = 'noopener';
+    } else {
+      panelLink.href = '#';
+      panelLink.textContent = 'リンク情報なし';
+      panelLink.removeAttribute('target');
+      panelLink.removeAttribute('rel');
+    }
   }
 
   slidePanel?.classList.add('is-active');
@@ -623,20 +552,28 @@ function renderPanelComments(placeId){
   }).join('');
 }
 
+/* ===== 起動・イベント ===== */
 (async function bootstrap(){
   try {
-    const raw = await fetchSpots();      // ① API取得
-    PLACES = raw.map(normalizeSpot);     // ② 正規化して PLACES に代入
+    const [rawSpots, geoTree] = await Promise.all([
+      fetchSpots(),
+      fetchGeoTree(),
+    ]);
+    PLACES = rawSpots.map(normalizeSpot);
+    GEO_TREE = geoTree;
+    GEO_READY = Object.keys(GEO_TREE).length > 0;
   } catch (e) {
     console.error(e);
     showToast('データ取得に失敗しました');
     PLACES = [];
+    GEO_TREE = {};
+    GEO_READY = false;
   }
-  initMap();                             // ③ 地図初期化（マーカー生成は中で）
-  buildTagBar();                         // ④ タグバー作成（PLACESを元に）
-  render(PLACES);                        // ⑤ 初回描画
+  initMap();
+  buildTagBar();
+  render(PLACES);
   updateFavCounter();
-  loadGeoTree();                         // ⑥ 地理ツリー読み込み
+  populateRegions();
 })();
 
 document.getElementById('searchForm')?.addEventListener('submit', e=>{ e.preventDefault(); applyFilters(); });
@@ -649,6 +586,31 @@ document.getElementById('sortByDistance')?.addEventListener('change', ()=>{
   applyFilters();
 });
 document.getElementById('locateBtn')?.addEventListener('click', locate);
+
+document.getElementById('radius')?.addEventListener('input', ()=>{
+  const radiusInput=document.getElementById('radius');
+  const radiusVal=document.getElementById('radiusVal');
+  if (!radiusInput || !radiusVal) return;
+  radiusVal.textContent=`${radiusInput.value}m`;
+  document.querySelectorAll('.pill').forEach(p=> p.classList.toggle('active', +p.dataset.r===+radiusInput.value));
+  if (selectionLayer instanceof L.Circle){ selectionLayer.setRadius(+radiusInput.value); applyFilters(); }
+});
+document.querySelectorAll('.pill').forEach(p=>{
+  p.addEventListener('click', ()=>{
+    const radiusInput=document.getElementById('radius');
+    if (!radiusInput) return;
+    radiusInput.value=p.dataset.r;
+    radiusInput.dispatchEvent(new Event('input'));
+  });
+});
+document.getElementById('centerHere')?.addEventListener('click', ()=>{
+  if (!currentLoc){ showToast('まず「現在地」を取得してください'); return; }
+  placeCircleAt(L.latLng(currentLoc.lat, currentLoc.lon));
+});
+
+document.getElementById('radius')?.addEventListener('touchstart', ()=> map?.dragging?.disable());
+document.getElementById('radius')?.addEventListener('touchend',   ()=> map?.dragging?.enable());
+
 document.getElementById('resetBtn')?.addEventListener('click', ()=>{
   const qEl=document.getElementById('q'); if(qEl) qEl.value='';
   ['onlyFavs','onlyDiscount','boundsOnly','sortByDistance'].forEach(id=>{ const el=document.getElementById(id); if(el) el.checked=false; });
@@ -656,8 +618,9 @@ document.getElementById('resetBtn')?.addEventListener('click', ()=>{
   if (centerDot){ centerDot.remove(); centerDot=null; }
   if (geoCircle){ geoCircle.remove(); geoCircle=null; }
   geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
-  regionSelect.value=''; prefSelect.innerHTML='<option value="">都道府県（まず地方を選択）</option>'; prefSelect.disabled=true;
-  citySelect.innerHTML='<option value="">市区町村（まず都道府県を選択）</option>'; citySelect.disabled=true;
+  if (regionSelect) regionSelect.value='';
+  if (prefSelect){ prefSelect.innerHTML='<option value="">都道府県（まず地方を選択）</option>'; prefSelect.disabled=true; }
+  if (citySelect){ citySelect.innerHTML='<option value="">市区町村（まず都道府県を選択）</option>'; citySelect.disabled=true; }
   selectedId=null; currentLoc=null; const gs=document.getElementById('geoStatus'); if(gs) gs.textContent='';
   map.setView(defaultCenter, defaultZoom);
   selectedTags.clear(); document.querySelectorAll('#tagBar .tagchip').forEach(b=> b.classList.remove('active'));
