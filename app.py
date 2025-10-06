@@ -7,7 +7,17 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 from flask import Flask, request, render_template, jsonify
 
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
+import gspread
+from google.oauth2.service_account import Credentials
+import os
+
 app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///reviews.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
 DATA_PATH = Path(__file__).parent / "data" / "data.csv"
 
 # 地方と都道府県のメタデータ（代表座標は県庁所在地付近）
@@ -251,6 +261,90 @@ def api_geo():
     spots = load_spots()
     tree = build_geo_tree(spots)
     return jsonify(tree)
+
+# ---- API ----
+@app.route("/api/reviews", methods=["POST"])
+def post_review():
+    data = request.get_json(force=True) or {}
+    place_id = data.get("place_id", "")
+    place_name = data.get("place_name", "")
+    author = data.get("author", "名無しさん")
+    comment = data.get("comment", "")
+    rating = int(data.get("rating", 0))
+    created_at = datetime.utcnow()
+    print("たのむよー")
+    # 1. DB保存
+    r = Review(
+        author=author,
+        comment=comment,
+        rating=rating,
+        created_at=created_at
+    )
+    db.session.add(r)
+    db.session.commit()
+
+    # 2. スプレッドシート保存（場所ID・場所名も追加）
+    try:
+        print("Google Sheets保存test")
+        worksheet.append_row([
+            str(place_id), str(place_name), str(created_at.isoformat()), str(author), str(comment), str(rating)
+        ])
+    except Exception as e:
+        print("Google Sheets保存エラー:", e)
+
+    return jsonify({"success": True, "id": r.id}), 201
+
+@app.route("/api/reviews", methods=["GET"])
+def get_reviews():
+    reviews = Review.query.order_by(Review.created_at.desc()).all()
+    return jsonify([
+        {
+            "id": r.id,
+            "author": r.author,
+            "comment": r.comment,
+            "rating": r.rating,
+            "created_at": r.created_at.isoformat()
+        }
+        for r in reviews
+    ])
+
+@app.route("/api/reviews/<int:rid>", methods=["PUT"])
+def update_review(rid):
+    r = Review.query.get_or_404(rid)
+    data = request.get_json(force=True) or {}
+    if "author" in data:  r.author  = data["author"].strip()
+    if "comment" in data: r.comment = data["comment"].strip()
+    if "rating" in data:  r.rating  = int(data["rating"])
+    db.session.commit()
+    return jsonify({"success": True})
+
+@app.route("/api/reviews/<int:rid>", methods=["DELETE"])
+def delete_review(rid):
+    r = Review.query.get_or_404(rid)
+    db.session.delete(r)
+    db.session.commit()
+    return jsonify({"success": True})
+
+# Reviewモデル
+class Review(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    author = db.Column(db.String(80), nullable=False)
+    comment = db.Column(db.Text, nullable=False)
+    rating = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+with app.app_context():
+    db.create_all()
+
+# Google Sheets認証
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+CREDS_FILE = 'sheet-api-470504-a2538cff344f.json'  # 認証ファイル名
+SPREADSHEET_ID = '1ADyw0jV2GETPE6Lr5eam1LayuScfz2AA-OopGoWQ6oo'  # ←必ず書き換え
+
+creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
+gc = gspread.authorize(creds)
+sh = gc.open_by_key(SPREADSHEET_ID)
+worksheet = sh.sheet1
 
 if __name__ == "__main__":
     # 開発用：自動リロード

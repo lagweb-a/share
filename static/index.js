@@ -479,28 +479,53 @@ function openPanelFor(p){
   // 評価入力
   const ratingInput = document.getElementById('ratingInput');
   const ratingValue = document.getElementById('ratingValue');
-  ratingInput?.querySelectorAll('.star-btn').forEach(btn=>{
+  ratingInput.querySelectorAll('.star-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const v = +btn.dataset.v;
-      if (ratingValue) ratingValue.value = v;
+      ratingValue.value = v;
       ratingInput.querySelectorAll('.star-btn').forEach(b=> b.classList.toggle('active', +b.dataset.v <= v));
     });
   });
-  document.getElementById('panelCommentForm')?.addEventListener('submit', (e)=>{
-    e.preventDefault();
-    const name = document.getElementById('cName').value.trim();
-    const text = document.getElementById('cText').value.trim();
-    const rating = +document.getElementById('ratingValue').value || 0;
-    if (!text){ showToast('コメントを入力してください'); return; }
-    if (!(rating>=1 && rating<=5)){ showToast('星の数を選択してください（1〜5）'); return; }
-    addComment(p.id, { name, text, rating, ts: Date.now() });
-    document.getElementById('cText').value = '';
-    document.getElementById('cName').value = '';
-    document.getElementById('ratingValue').value = 0;
-    ratingInput?.querySelectorAll('.star-btn').forEach(b=> b.classList.remove('active'));
-    renderPanelComments(p.id);
-    applyFilters();
-  });
+  document.getElementById('panelCommentForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const name = document.getElementById('cName').value.trim();
+  const text = document.getElementById('cText').value.trim();
+  const rating = +document.getElementById('ratingValue').value || 0;
+  if (!text){ showToast('コメントを入力してください'); return; }
+  if (!(rating>=1 && rating<=5)){ showToast('星の数を選択してください（1〜5）'); return; }
+
+  // localStorageにも保存
+  addComment(p.id, { name, text, rating, ts: Date.now() });
+
+  // サーバーにもPOST
+  try {
+    await fetch('/api/reviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        place_id: p.id,
+        place_name: p.name,
+        author: name || '名無しさん',
+        comment: text,
+        rating: rating
+      })
+    });
+  } catch (err) {
+    showToast('サーバー保存に失敗しました');
+  }
+
+  // 入力欄リセット
+  document.getElementById('cText').value = '';
+  document.getElementById('cName').value = '';
+  ratingValue.value = 0;
+  ratingInput.querySelectorAll('.star-btn').forEach(b=> b.classList.remove('active'));
+
+  // localStorageのコメント表示
+  renderPanelComments(p.id);
+  // 必要ならサーバー側の最新コメント取得も追加可能
+
+  applyFilters();
+});
   renderPanelComments(p.id);
 
   // 公式/学割ページへの導線（なければGoogleマップ）
