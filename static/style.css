@@ -23,6 +23,46 @@ body{
 .login{ display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:999px;
         background:#111827; color:#fff; text-decoration:none; font-weight:700 }
 
+.auth-card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:22px;
+  box-shadow:var(--shadow);
+  padding:20px;
+  display:grid;
+  gap:12px;
+}
+.auth-card form{ display:grid; gap:10px; max-width:320px }
+.auth-card input{
+  padding:12px 14px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  font-size:15px;
+}
+.auth-card button{ cursor:pointer }
+
+.search-history-card{
+  border-top:1px solid var(--border);
+  padding:14px 16px 18px;
+  background:#f8fbff;
+}
+.search-history-card h3{
+  margin:0 0 10px;
+  font-size:15px;
+  color:#1f2a44;
+}
+.search-history-list{ display:flex; gap:8px; flex-wrap:wrap }
+.search-history-list button{
+  border:1px solid var(--accent-3);
+  border-radius:999px;
+  background:#fff;
+  padding:6px 12px;
+  font-size:13px;
+  cursor:pointer;
+  color:#1f2a44;
+}
+.search-history-list button:hover{ border-color:var(--accent); box-shadow:0 0 0 3px #3b82f622 }
+        
   /* Hero */
 .hero{
   background:

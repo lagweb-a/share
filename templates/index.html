@@ -24,9 +24,76 @@
       <span class="badge" aria-hidden="true"></span>
       <span>Lagrangelo web開発チーム</span>
     </div>
-    <a class="login" href="https://lagrangero-group4.web.app/?v=2" target="_blank" rel="noopener">ログイン</a>
-  </div>
+    <a class="login" data-guest href="#login" onclick="event.preventDefault(); document.getElementById('memberLoginEmail')?.focus();">ログイン</a>
+    <button class="login" data-member hidden type="button" onclick="import('{{ url_for('static', filename='js/firebase-auth.js') }}").then(m => m.doLogout()).catch(console.error)">ログアウト</button>
 </div>
+
+<!-- Auth Switcher -->
+<section class="auth-section" data-guest>
+  <div class="wrap" style="padding-top:12px;">
+    <div class="auth-card">
+      <h2 style="margin:0">ゲスト向けコンテンツ</h2>
+      <p style="margin:4px 0 0; color:#475569;">ログインすると会員機能（お気に入り・コメント・検索履歴）が使えます。</p>
+      <form id="memberLoginForm">
+        <input id="memberLoginEmail" name="email" type="email" placeholder="Email" required />
+        <input id="memberLoginPassword" name="password" type="password" placeholder="Password" required />
+        <button type="submit" class="btn primary" style="justify-content:center">ログイン</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section class="auth-section" data-member hidden>
+  <div class="wrap" style="padding-top:12px;">
+    <div class="auth-card">
+      <h2 style="margin:0">会員向けコンテンツ</h2>
+      <p style="margin:4px 0 12px; color:#475569;">Firebaseで認証された会員さま向けの情報です。</p>
+      <pre id="member-content" style="margin:0; white-space:pre-wrap; background:#f1f5f9; padding:12px; border-radius:12px; font-size:13px; max-height:180px; overflow:auto;"></pre>
+      <div>
+        <!-- index.html -->
+
+
+<!-- Nav 内の例 -->
+<a class="login"  data-guest href="#login" onclick="openLoginModal()">ログイン</a>
+<button class="signup" data-guest type="button" onclick="signup()">新規登録</button>
+
+<button class="logout" data-member hidden type="button" onclick="doLogout()">
+  ログアウト
+</button>
+
+<!-- ボタン例 -->
+<button type="button" onclick="signup()">新規登録</button>
+
+<script type="module">
+  import { getAuth, createUserWithEmailAndPassword, sendEmailVerification } 
+    from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
+
+  const app = initializeApp({ 
+  apiKey: "AIzaSyBZabUBc38cEJkjhgLFeuenlwzivKrlhfM",
+  authDomain: "lagrangero-group4.firebaseapp.com",
+  projectId: "lagrangero-group4",
+});
+  const auth = getAuth(app);
+
+  // 入力は適宜 document.getElementById('signupEmail') などから取得してね
+  window.signup = async () => {
+    const email = prompt('メールアドレス');      // ←仮のUI。実際はフォームでOK
+    const pass  = prompt('パスワード(6文字以上)');
+    const cred = await createUserWithEmailAndPassword(auth, email, pass);
+    // 任意: メール認証を使いたい場合
+    // await sendEmailVerification(cred.user);
+    alert('登録完了！このまま会員UIに切り替わります');
+  };
+</script>
+
+<!-- ページの最後に追加 -->
+<script type="module" src="{{ url_for('static', filename='js/firebase-auth.js') }}"></script>
+
+      </div>
+    </div>
+  </div>
+</section>
 
 <!-- Hero -->
 <section class="hero">
@@ -78,6 +145,10 @@
       <button id="resetBtn" class="btn" type="button">↺ リセット</button>
       <small id="geoStatus" class="muted"></small>
       <small id="favCounter" class="muted"></small>
+    </div>
+    <div class="search-history-card" data-member hidden>
+      <h3>最近の検索</h3>
+      <div id="searchHistoryList" class="search-history-list" aria-live="polite"></div>
     </div>
   </div>
 </div>
@@ -132,8 +203,28 @@
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <!-- Scripts -->
+<script type="module" src="{{ url_for('static', filename='js/firebase-auth.js') }}"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="{{url_for('static', filename='index.js')}}"></script>
+<script>
+  document.getElementById('memberLoginForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const email = form.email?.value?.trim();
+    const password = form.password?.value;
+    if (!email || !password) {
+      alert('メールアドレスとパスワードを入力してください。');
+      return;
+    }
+    try {
+      const mod = await import('{{ url_for('static', filename='js/firebase-auth.js') }}');
+      await mod.doLogin(email, password);
+    } catch (error) {
+      console.error(error);
+      alert('ログインに失敗しました。入力内容をご確認ください。');
+    }
+  });
+</script>
 </body>
 </html>

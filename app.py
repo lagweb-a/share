@@ -1,23 +1,137 @@
 from collections import defaultdict
+from functools import wraps
+import json
 import math
+import os, json
+import firebase_admin
+from firebase_admin import credentials, auth as fb_auth
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
-from flask import Flask, request, render_template, jsonify
+from flask import Flask, jsonify, render_template, request
+from flask_cors import CORS
 
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+import firebase_admin
+from firebase_admin import auth as fb_auth
+from firebase_admin import credentials
 import gspread
+import pathlib
 from google.oauth2.service_account import Credentials
-import os
 
 app = Flask(__name__)
+CORS(app, supports_credentials=True)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///reviews.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
+def init_firebase_admin():
+   """
++    1) 環境変数 FIREBASE_SERVICE_ACCOUNT_JSON にJSON文字列が入っていればそれを使う
++    2) 無ければ app.py と同じ階層の serviceAccountKey.json を読み込む
++    """
+cred_obj = None
+sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
+if sa_json:
+    try:
+        cred_obj = credentials.Certificate(json.loads(sa_json))
+        print("[firebase] using credentials from env var")
+    except Exception as e:
+        print("[firebase] env var set but invalid JSON:", e)
+
+if cred_obj is None:
+    key_path = pathlib.Path(__file__).with_name("serviceAccountKey.json")
+    if not key_path.exists():
+        raise RuntimeError(
+            "FIREBASE_SERVICE_ACCOUNT_JSON is not set and "
+            f"{key_path.name} not found next to app.py"
+      )
+        cred_obj = credentials.Certificate(str(key_path))
+        print(f"[firebase] using credentials file: {key_path}")
+
+try:
+    firebase_admin.get_app()
+except ValueError:
+    firebase_admin.initialize_app(cred_obj)
+
+# ← アプリ起動時に一度だけ初期化
+init_firebase_admin()
+
+
+def verify_firebase_id_token():
+    """Authorization: Bearer <ID_TOKEN> を検証。成功時は dict を返す。"""
+    authz = request.headers.get("Authorization", "")
+    if not authz.startswith("Bearer "):
+        return None
+    id_token = authz.split(" ", 1)[1].strip()
+    if not id_token:
+        return None
+    try:
+        return fb_auth.verify_id_token(id_token)
+    except Exception:
+        return None
+
+
+def login_required(fn):
+    """Firebase IDトークンを要求するデコレータ。"""
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        user = verify_firebase_id_token()
+        if not user:
+            return jsonify({"error": "unauthorized"}), 401
+        request.firebase_user = user
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def current_user():
+    """検証済みのFirebaseユーザー情報(dict)を返す。"""
+    return getattr(request, "firebase_user", None) or verify_firebase_id_token() or {}
+
+
+def json_no_store(payload, status=200):
+    response = jsonify(payload)
+    response.status_code = status
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _uid_from_request():
+    user = current_user()
+    return user.get("uid") if user else None
+
+
+def _trim_search_history(uid: str, keep: int = 20) -> None:
+    obsolete = (
+        SearchHistory.query.filter_by(uid=uid)
+        .order_by(SearchHistory.created_at.desc())
+        .offset(keep)
+        .all()
+    )
+    for row in obsolete:
+        db.session.delete(row)
+
+
+@app.get("/api/public")
+def public_api():
+    return jsonify({"ok": True})
+
+
+@app.get("/api/member-only")
+@login_required
+def member_only():
+    user = current_user()
+    payload = {
+        "message": "member ok",
+        "uid": user.get("uid"),
+        "email": user.get("email"),
+    }
+    return json_no_store(payload)
 DATA_PATH = Path(__file__).parent / "data" / "data.csv"
 
 # 地方と都道府県のメタデータ（代表座標は県庁所在地付近）
@@ -262,6 +376,172 @@ def api_geo():
     tree = build_geo_tree(spots)
     return jsonify(tree)
 
+@app.post("/api/favorites/add")
+@login_required
+def favorites_add():
+    uid = _uid_from_request()
+    if not uid:
+        return json_no_store({"error": "invalid-token"}, 401)
+    data = request.get_json(silent=True) or {}
+    item_id = (data.get("item_id") or "").strip()
+    if not item_id:
+        return json_no_store({"error": "item_id required"}, 400)
+
+    favorite = Favorite.query.filter_by(uid=uid, item_id=item_id).first()
+    if favorite:
+        return json_no_store({"ok": True, "id": favorite.id})
+
+    favorite = Favorite(uid=uid, item_id=item_id)
+    db.session.add(favorite)
+    db.session.commit()
+    return json_no_store({"ok": True, "id": favorite.id}, 201)
+
+
+@app.get("/api/favorites/list")
+@login_required
+def favorites_list():
+    uid = _uid_from_request()
+    if not uid:
+        return json_no_store({"error": "invalid-token"}, 401)
+    favorites = (
+        Favorite.query.filter_by(uid=uid)
+        .order_by(Favorite.created_at.desc())
+        .all()
+    )
+    items = [
+        {
+            "item_id": fav.item_id,
+            "created_at": fav.created_at.isoformat(),
+        }
+        for fav in favorites
+    ]
+    return json_no_store({"items": items})
+
+
+@app.delete("/api/favorites/remove")
+@login_required
+def favorites_remove():
+    uid = _uid_from_request()
+    if not uid:
+        return json_no_store({"error": "invalid-token"}, 401)
+    data = request.get_json(silent=True) or {}
+    item_id = (data.get("item_id") or "").strip()
+    if not item_id:
+        return json_no_store({"error": "item_id required"}, 400)
+
+    favorite = Favorite.query.filter_by(uid=uid, item_id=item_id).first()
+    if favorite:
+        db.session.delete(favorite)
+        db.session.commit()
+    return json_no_store({"ok": True})
+
+
+@app.post("/api/comments")
+@login_required
+def post_member_comment():
+    uid = _uid_from_request()
+    if not uid:
+        return json_no_store({"error": "invalid-token"}, 401)
+    data = request.get_json(force=True) or {}
+    target_id = (data.get("target_id") or "").strip()
+    target_name = (data.get("target_name") or "").strip() or None
+    author = (data.get("author") or "").strip() or None
+    body = (data.get("body") or "").strip()
+    rating = int(data.get("rating") or 0)
+    if not target_id or not body:
+        return json_no_store({"error": "target_id and body required"}, 400)
+    if rating < 1 or rating > 5:
+        return json_no_store({"error": "rating must be between 1 and 5"}, 400)
+
+    comment = MemberComment(
+        uid=uid,
+        target_id=target_id,
+        target_name=target_name,
+        author=author,
+        body=body,
+        rating=rating,
+    )
+    db.session.add(comment)
+    db.session.commit()
+    payload = {
+        "id": comment.id,
+        "target_id": comment.target_id,
+        "target_name": comment.target_name,
+        "author": comment.author,
+        "body": comment.body,
+        "rating": comment.rating,
+        "created_at": comment.created_at.isoformat(),
+    }
+    return json_no_store(payload, 201)
+
+
+@app.get("/api/comments")
+@login_required
+def get_member_comments():
+    uid = _uid_from_request()
+    if not uid:
+        return json_no_store({"error": "invalid-token"}, 401)
+    target_id = (request.args.get("target_id") or "").strip()
+    query = MemberComment.query.filter_by(uid=uid)
+    if target_id:
+        query = query.filter_by(target_id=target_id)
+    comments = query.order_by(MemberComment.created_at.desc()).all()
+    items = [
+        {
+            "id": c.id,
+            "target_id": c.target_id,
+            "target_name": c.target_name,
+            "author": c.author,
+            "body": c.body,
+            "rating": c.rating,
+            "created_at": c.created_at.isoformat(),
+        }
+        for c in comments
+    ]
+    return json_no_store({"comments": items})
+
+
+@app.post("/api/search-history")
+@login_required
+def save_search_query():
+    uid = _uid_from_request()
+    if not uid:
+        return json_no_store({"error": "invalid-token"}, 401)
+    data = request.get_json(silent=True) or {}
+    query_text = (data.get("query") or "").strip()
+    if not query_text:
+        return json_no_store({"error": "query required"}, 400)
+
+    existing = SearchHistory.query.filter_by(uid=uid, query=query_text).first()
+    now = datetime.utcnow()
+    if existing:
+        existing.created_at = now
+    else:
+        db.session.add(SearchHistory(uid=uid, query=query_text, created_at=now))
+    db.session.flush()
+    _trim_search_history(uid)
+    db.session.commit()
+    return json_no_store({"ok": True})
+
+
+@app.get("/api/search-history")
+@login_required
+def list_queries():
+    uid = _uid_from_request()
+    if not uid:
+        return json_no_store({"error": "invalid-token"}, 401)
+    records = (
+        SearchHistory.query.filter_by(uid=uid)
+        .order_by(SearchHistory.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    items = [
+        {"query": r.query, "created_at": r.created_at.isoformat()}
+        for r in records
+    ]
+    return json_no_store({"queries": items})
+
 # ---- API ----
 @app.route("/api/reviews", methods=["POST"])
 def post_review():
@@ -332,6 +612,41 @@ class Review(db.Model):
     comment = db.Column(db.Text, nullable=False)
     rating = db.Column(db.Integer, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Favorite(db.Model):
+    __tablename__ = "favorites"
+
+    id = db.Column(db.Integer, primary_key=True)
+    uid = db.Column(db.String(128), nullable=False, index=True)
+    item_id = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("uid", "item_id", name="uq_favorites_uid_item"),
+    )
+
+
+class MemberComment(db.Model):
+    __tablename__ = "member_comments"
+
+    id = db.Column(db.Integer, primary_key=True)
+    uid = db.Column(db.String(128), nullable=False, index=True)
+    target_id = db.Column(db.String(255), nullable=False, index=True)
+    target_name = db.Column(db.String(255), nullable=True)
+    author = db.Column(db.String(80), nullable=True)
+    body = db.Column(db.Text, nullable=False)
+    rating = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class SearchHistory(db.Model):
+    __tablename__ = "search_history"
+
+    id = db.Column(db.Integer, primary_key=True)
+    uid = db.Column(db.String(128), nullable=False, index=True)
+    query = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
 
 with app.app_context():
     db.create_all()

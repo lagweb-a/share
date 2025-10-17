@@ -3,6 +3,11 @@ let PLACES = [];
 let GEO_TREE = {};
 let GEO_READY = false;
 
+const memberAuth = { user: null, idToken: null, isLoggedIn: false };
+let favs = new Set();
+const commentsCache = new Map();
+let searchHistory = [];
+
 // Flask の /api/spots からJSONを取得
 async function fetchSpots(params = {}) {
   const usp = new URLSearchParams(params);
@@ -15,6 +20,20 @@ async function fetchGeoTree() {
   const res = await fetch('/api/geo');
   if (!res.ok) throw new Error('地域データの取得に失敗しました');
   return res.json();
+}
+
+async function authorizedFetch(url, options = {}) {
+  if (!memberAuth.idToken) {
+    throw new Error('unauthorized');
+  }
+  const init = { ...options };
+  const headers = new Headers(init.headers || {});
+  headers.set('Authorization', `Bearer ${memberAuth.idToken}`);
+  if (init.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  init.headers = headers;
+  return fetch(url, init);
 }
 
 // API返却: id,name,url,address,lat,lon,tags,description,image_url,price
@@ -170,23 +189,177 @@ const R=6371; const haversineKm=(a,b)=>{const r=x=>x*Math.PI/180;const dLat=r(b[
 const showToast=m=>{const t=document.getElementById('toast'); if(!t) return; t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1500);};
 const starHTML=(n,max=5)=>{ n=Math.max(0,Math.min(max,Math.round(n))); return '<span class="stars">'+Array.from({length:max},(_,i)=>`<span class="star ${i<n?'filled':''}">★</span>`).join('')+'</span>'; };
 
-/* ===== お気に入り（localStorage） ===== */
-const FAV_KEY='yokohama.demo.favs.v1';
-function loadFavs(){ try{ return new Set(JSON.parse(localStorage.getItem(FAV_KEY)||'[]')); } catch{ return new Set(); } }
-function saveFavs(set){ localStorage.setItem(FAV_KEY, JSON.stringify(Array.from(set))); }
-let favs = loadFavs();
-const isFav = id => favs.has(id);
-function toggleFav(id){ if(favs.has(id)) favs.delete(id); else favs.add(id); saveFavs(favs); updateFavCounter(); }
-function updateFavCounter(){ const el=document.getElementById('favCounter'); if(el) el.textContent = `★お気に入り ${favs.size}`; }
+const escapeHtml = (s='') => s.replace(/[&<>"']/g, (ch)=>({
+  '&':'&amp;',
+  '<':'&lt;',
+  '>':'&gt;',
+  '"':'&quot;',
+  "'":'&#39;',
+}[ch]));
 
-/* ===== コメント＆評価（localStorage） ===== */
-const COMMENTS_KEY='yokohama.demo.placeComments.v1';
-function loadAllComments(){ try{ return JSON.parse(localStorage.getItem(COMMENTS_KEY)||'{}'); } catch{ return {}; } }
-function saveAllComments(obj){ localStorage.setItem(COMMENTS_KEY, JSON.stringify(obj)); }
-function getComments(placeId){ const all=loadAllComments(); return Array.isArray(all[placeId])? all[placeId] : []; }
-function setComments(placeId, arr){ const all=loadAllComments(); all[placeId]=arr; saveAllComments(all); }
-function addComment(placeId, c){ const arr=getComments(placeId); arr.push(c); setComments(placeId, arr); }
-function avgRating(placeId){ const arr=getComments(placeId); if(!arr.length) return {avg:0,count:0}; const s=arr.reduce((a,b)=>a+(+b.rating||0),0); return {avg:s/arr.length, count:arr.length}; }
+/* ===== お気に入り／コメント（会員専用） ===== */
+const isFav = (id) => memberAuth.isLoggedIn && favs.has(id);
+
+async function loadFavorites() {
+  if (!memberAuth.isLoggedIn) {
+    favs = new Set();
+    updateFavCounter();
+    return;
+  }
+  try {
+    const res = await authorizedFetch('/api/favorites/list');
+    const data = await res.json();
+    favs = new Set((data.items || []).map((item) => item.item_id));
+  } catch (err) {
+    console.error('お気に入り取得エラー', err);
+    favs = new Set();
+  }
+  updateFavCounter();
+}
+
+async function toggleFav(id) {
+  if (!memberAuth.isLoggedIn) {
+    showToast('お気に入りは会員限定です。ログインしてください。');
+    return;
+  }
+  try {
+    if (favs.has(id)) {
+      await authorizedFetch('/api/favorites/remove', {
+        method: 'DELETE',
+        body: JSON.stringify({ item_id: id }),
+      });
+      favs.delete(id);
+    } else {
+      await authorizedFetch('/api/favorites/add', {
+        method: 'POST',
+        body: JSON.stringify({ item_id: id }),
+      });
+      favs.add(id);
+    }
+    updateFavCounter();
+  } catch (err) {
+    console.error('お気に入り更新エラー', err);
+    showToast('お気に入りの更新に失敗しました');
+  }
+}
+
+function updateFavCounter(){
+  const el=document.getElementById('favCounter');
+  if (!el) return;
+  if (!memberAuth.isLoggedIn){
+    el.textContent = '★お気に入りはログイン後に利用できます';
+  } else {
+    el.textContent = `★お気に入り ${favs.size}`;
+  }
+}
+
+function syncFavFilterAvailability(){
+  const el=document.getElementById('onlyFavs');
+  if (!el) return;
+  if (!memberAuth.isLoggedIn){
+    el.checked = false;
+    el.disabled = true;
+  } else {
+    el.disabled = false;
+  }
+}
+
+async function ensureComments(placeId){
+  if (!memberAuth.isLoggedIn){
+    commentsCache.delete(placeId);
+    return [];
+  }
+  if (commentsCache.has(placeId)){
+    return commentsCache.get(placeId);
+  }
+  try {
+    const res = await authorizedFetch(`/api/comments?target_id=${encodeURIComponent(placeId)}`);
+    const data = await res.json();
+    const items = Array.isArray(data.comments) ? data.comments : [];
+    commentsCache.set(placeId, items);
+    return items;
+  } catch (err) {
+    console.error('コメント取得エラー', err);
+    commentsCache.set(placeId, []);
+    return [];
+  }
+}
+async function submitMemberComment(place, payload){
+  const body = {
+    target_id: place.id,
+    target_name: place.name,
+    body: payload.body,
+    rating: payload.rating,
+    author: payload.author || null,
+  };
+  const res = await authorizedFetch('/api/comments', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  const existing = commentsCache.get(place.id) || [];
+  existing.unshift(data);
+  commentsCache.set(place.id, existing);
+  return data;
+}
+
+function avgRating(placeId){
+  const arr = commentsCache.get(placeId) || [];
+  if (!arr.length) return { avg: 0, count: 0 };
+  const total = arr.reduce((sum, c) => sum + (+c.rating || 0), 0);
+  return { avg: total / arr.length, count: arr.length };
+}
+
+async function refreshSearchHistory(){
+  if (!memberAuth.isLoggedIn){
+    searchHistory = [];
+    updateSearchHistoryUI();
+    return;
+  }
+  try {
+    const res = await authorizedFetch('/api/search-history');
+    const data = await res.json();
+    searchHistory = Array.isArray(data.queries) ? data.queries : [];
+  } catch (err) {
+    console.error('検索履歴取得エラー', err);
+    searchHistory = [];
+  }
+  updateSearchHistoryUI();
+}
+
+async function recordSearchQuery(query){
+  if (!memberAuth.isLoggedIn || !query) return;
+  try {
+    await authorizedFetch('/api/search-history', {
+      method: 'POST',
+      body: JSON.stringify({ query }),
+    });
+    await refreshSearchHistory();
+  } catch (err) {
+    console.error('検索履歴保存エラー', err);
+  }
+}
+
+function updateSearchHistoryUI(){
+  const container = document.getElementById('searchHistoryList');
+  if (!container) return;
+  container.innerHTML = '';
+  if (!memberAuth.isLoggedIn){
+    container.textContent = '';
+    return;
+  }
+  if (!searchHistory.length){
+    container.innerHTML = '<p class="muted" style="margin:0">検索履歴はまだありません。</p>';
+    return;
+  }
+  searchHistory.forEach((item)=>{
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = item.query;
+    btn.dataset.query = item.query;
+    container.appendChild(btn);
+  });
+}
 
 /* ===== 地図・マーカー ===== */
 let map, cluster, selectionLayer=null, centerDot=null, currentLoc=null, selectedId=null;
@@ -367,8 +540,9 @@ function render(list){
       selectedId=p.id; highlightSelected();
     }));
     card.querySelectorAll('[data-action="detail"]').forEach(b=> b.addEventListener('click', ()=> openPanelFor(p)));
-    card.querySelector('[data-action="fav"]').addEventListener('click', ()=>{
-      toggleFav(p.id);
+    card.querySelector('[data-action="fav"]').addEventListener('click', async ()=>{
+      await toggleFav(p.id);
+      updateFavInPanel(p.id);
       applyFilters();
     });
     listEl.appendChild(card);
@@ -393,7 +567,7 @@ function highlightSelected(){ document.querySelectorAll('.card').forEach(el=> el
 function applyFilters(){
   const q=document.getElementById('q')?.value||'';
   const list=filterPlaces(q,{
-    onlyFavs: document.getElementById('onlyFavs')?.checked,
+    onlyFavs: memberAuth.isLoggedIn && document.getElementById('onlyFavs')?.checked,
     onlyDiscount: document.getElementById('onlyDiscount')?.checked,
     boundsOnly:   document.getElementById('boundsOnly')?.checked,
     sortByDistance: document.getElementById('sortByDistance')?.checked && !!currentLoc
@@ -423,8 +597,13 @@ document.getElementById('closePanel')?.addEventListener('click', ()=>{
 });
 
 function starHTMLInline(n){ return starHTML(n).replaceAll('class="stars"','class="stars" style="transform:translateY(2px)"'); }
-function openPanelFor(p){
+async function openPanelFor(p){
   selectedId = p.id;
+  if (memberAuth.isLoggedIn){
+    await ensureComments(p.id);
+  } else {
+    commentsCache.delete(p.id);
+  }
   const ratingInfo = avgRating(p.id);
   if (panelTitle) panelTitle.textContent = p.name;
 
@@ -441,8 +620,8 @@ function openPanelFor(p){
       ${mapSection}
       <div class="comment-block">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <div>${starHTMLInline(ratingInfo.avg)}</div>
-          <span class="muted-on-dark">${ratingInfo.count? ratingInfo.avg.toFixed(1) : '—'} / 5 ・ ${ratingInfo.count}件</span>
+          <div id="panelRatingStars">${starHTMLInline(ratingInfo.avg)}</div>
+          <span class="muted-on-dark" id="panelRatingSummary">${ratingInfo.count? ratingInfo.avg.toFixed(1) : '—'} / 5 ・ ${ratingInfo.count}件</span>
           </div>
         <p class="muted-on-dark" style="margin:.4em 0 0">${p.desc||''}</p>
         <p>${(p.tags||[]).map(t=>`<span class="tag" style="background:#0b1220;color:#e5e7eb;border:1px solid #374151">${t}</span>`).join(' ')}</p>
@@ -451,6 +630,7 @@ function openPanelFor(p){
 
       <div>
         <h4 style="margin:6px 0">口コミを投稿</h4>
+        ${memberAuth.isLoggedIn ? '' : '<p class="muted-on-dark" id="commentLoginNotice" style="margin:6px 0">ログインすると口コミを投稿できます。</p>'}
         <form id="panelCommentForm" class="comment-form">
           <div class="rating-input" id="ratingInput" aria-label="星評価（1〜5）">
             <button type="button" class="star-btn" data-v="1">★</button>
@@ -474,7 +654,7 @@ function openPanelFor(p){
     `;
   }
   updateFavInPanel(p.id);
-  if (favInPanel) favInPanel.onclick = ()=>{ toggleFav(p.id); updateFavInPanel(p.id); applyFilters(); };
+  if (favInPanel) favInPanel.onclick = async ()=>{ await toggleFav(p.id); updateFavInPanel(p.id); applyFilters(); };
 
   // 評価入力
   const ratingInput = document.getElementById('ratingInput');
@@ -486,46 +666,42 @@ function openPanelFor(p){
       ratingInput.querySelectorAll('.star-btn').forEach(b=> b.classList.toggle('active', +b.dataset.v <= v));
     });
   });
-  document.getElementById('panelCommentForm').addEventListener('submit', async (e)=>{
-  e.preventDefault();
-  const name = document.getElementById('cName').value.trim();
-  const text = document.getElementById('cText').value.trim();
-  const rating = +document.getElementById('ratingValue').value || 0;
-  if (!text){ showToast('コメントを入力してください'); return; }
-  if (!(rating>=1 && rating<=5)){ showToast('星の数を選択してください（1〜5）'); return; }
-
-  // localStorageにも保存
-  addComment(p.id, { name, text, rating, ts: Date.now() });
-
-  // サーバーにもPOST
-  try {
-    await fetch('/api/reviews', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        place_id: p.id,
-        place_name: p.name,
-        author: name || '名無しさん',
-        comment: text,
-        rating: rating
-      })
+  const form = document.getElementById('panelCommentForm');
+  if (form){
+    if (!memberAuth.isLoggedIn){
+      form.querySelectorAll('input, textarea, button').forEach(el=> el.disabled = true);
+    }
+    form.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      if (!memberAuth.isLoggedIn){
+        showToast('ログインしてください');
+        return;
+      }
+      const name = document.getElementById('cName').value.trim();
+      const text = document.getElementById('cText').value.trim();
+      const rating = +document.getElementById('ratingValue').value || 0;
+      if (!text){ showToast('コメントを入力してください'); return; }
+      if (!(rating>=1 && rating<=5)){ showToast('星の数を選択してください（1〜5）'); return; }
+      try {
+        await submitMemberComment(p, { author: name || memberAuth.user?.email || '', body: text, rating });
+        document.getElementById('cText').value = '';
+        document.getElementById('cName').value = '';
+        ratingValue.value = 0;
+        ratingInput.querySelectorAll('.star-btn').forEach(b=> b.classList.remove('active'));
+        renderPanelComments(p.id);
+        const info = avgRating(p.id);
+        const starsEl = document.getElementById('panelRatingStars');
+        const summaryEl = document.getElementById('panelRatingSummary');
+        if (starsEl) starsEl.innerHTML = starHTMLInline(info.avg);
+        if (summaryEl) summaryEl.textContent = `${info.count? info.avg.toFixed(1) : '—'} / 5 ・ ${info.count}件`;
+        showToast('口コミを投稿しました');
+      } catch (err) {
+        console.error('コメント投稿エラー', err);
+        showToast('口コミの投稿に失敗しました');
+      }
     });
-  } catch (err) {
-    showToast('サーバー保存に失敗しました');
   }
 
-  // 入力欄リセット
-  document.getElementById('cText').value = '';
-  document.getElementById('cName').value = '';
-  ratingValue.value = 0;
-  ratingInput.querySelectorAll('.star-btn').forEach(b=> b.classList.remove('active'));
-
-  // localStorageのコメント表示
-  renderPanelComments(p.id);
-  // 必要ならサーバー側の最新コメント取得も追加可能
-
-  applyFilters();
-});
   renderPanelComments(p.id);
 
   // 公式/学割ページへの導線（なければGoogleマップ）
@@ -554,6 +730,7 @@ function openPanelFor(p){
 }
 function updateFavInPanel(id){
   if (!favInPanel) return;
+  favInPanel.disabled = !memberAuth.isLoggedIn;
   favInPanel.classList.toggle('active', isFav(id));
   favInPanel.textContent = (isFav(id) ? '♥' : '♡') + ' お気に入り';
   updateFavCounter();
@@ -561,21 +738,51 @@ function updateFavInPanel(id){
 function renderPanelComments(placeId){
   const listEl = document.getElementById('panelCommentList');
   if (!listEl) return;
-  const arr = getComments(placeId);
+  if (!memberAuth.isLoggedIn){
+    listEl.innerHTML = '<p class="muted-on-dark" style="margin:6px 0">ログインすると口コミを閲覧できます。</p>';
+    return;
+  }
+  const arr = commentsCache.get(placeId) || [];
   if (!arr.length){
     listEl.innerHTML = `<p class="muted-on-dark" style="margin:6px 0">口コミはまだありません。最初のレビューを書きませんか？</p>`;
     return;
   }
-  listEl.innerHTML = arr.slice().reverse().map(c=>{
-    const when = new Date(c.ts).toLocaleString();
-    return `
-      <div class="comment-line">
-        <div>${starHTML(c.rating)}</div>
-        <div style="margin:.2em 0 .2em">${c.text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
-        <small>${c.name||'名無しさん'} ・ ${when}</small>
-      </div>`;
-  }).join('');
+  listEl.innerHTML = arr.map(c=>{
+    const when = c.created_at ? new Date(c.created_at).toLocaleString() : '';
+    const author = c.author ? escapeHtml(c.author) : '会員ユーザー';
+      return `
+    <div class="comment-line">
+      <div>${escapeHtml(c.body || '')}</div>
+      <small>${author}　${when}</small>
+    </div>
+  `;
+}).join('');
 }
+
+window.addEventListener('firebase-auth-state', async (event)=>{
+  const detail = event.detail || {};
+  memberAuth.user = detail.user || null;
+  memberAuth.idToken = detail.idToken || null;
+  memberAuth.isLoggedIn = Boolean(memberAuth.user && memberAuth.idToken);
+  commentsCache.clear();
+  if (memberAuth.isLoggedIn){
+    await loadFavorites();
+    await refreshSearchHistory();
+  } else {
+    favs = new Set();
+    searchHistory = [];
+    updateFavCounter();
+    updateSearchHistoryUI();
+  }
+  syncFavFilterAvailability();
+  if (selectedId && slidePanel?.classList.contains('is-active')){
+    const place = PLACES.find(item => item.id === selectedId);
+    if (place){
+      await openPanelFor(place);
+    }
+  }
+  applyFilters();
+});
 
 /* ===== 起動・イベント ===== */
 (async function bootstrap(){
@@ -599,9 +806,16 @@ function renderPanelComments(placeId){
   render(PLACES);
   updateFavCounter();
   populateRegions();
+  syncFavFilterAvailability();
+  updateSearchHistoryUI();
 })();
 
-document.getElementById('searchForm')?.addEventListener('submit', e=>{ e.preventDefault(); applyFilters(); });
+document.getElementById('searchForm')?.addEventListener('submit', (e)=>{
+  e.preventDefault();
+  applyFilters();
+  const qVal = document.getElementById('q')?.value?.trim();
+  recordSearchQuery(qVal);
+});
 document.getElementById('q')?.addEventListener('input', ()=> applyFilters());
 ['onlyFavs','onlyDiscount','boundsOnly'].forEach(id=>{
   const el=document.getElementById(id); el&&el.addEventListener('change', applyFilters);
@@ -616,7 +830,7 @@ document.getElementById('radius')?.addEventListener('input', ()=>{
   const radiusInput=document.getElementById('radius');
   const radiusVal=document.getElementById('radiusVal');
   if (!radiusInput || !radiusVal) return;
-  radiusVal.textContent=`${radiusInput.value}m`;
+  radiusVal.textContent=`;{radiusInput.value}m`;
   document.querySelectorAll('.pill').forEach(p=> p.classList.toggle('active', +p.dataset.r===+radiusInput.value));
   if (selectionLayer instanceof L.Circle){ selectionLayer.setRadius(+radiusInput.value); applyFilters(); }
 });
@@ -631,6 +845,16 @@ document.querySelectorAll('.pill').forEach(p=>{
 document.getElementById('centerHere')?.addEventListener('click', ()=>{
   if (!currentLoc){ showToast('まず「現在地」を取得してください'); return; }
   placeCircleAt(L.latLng(currentLoc.lat, currentLoc.lon));
+});
+
+document.getElementById('searchHistoryList')?.addEventListener('click', (event)=>{
+  const btn = event.target.closest('button[data-query]');
+  if (!btn) return;
+  const qEl = document.getElementById('q');
+  if (qEl){
+    qEl.value = btn.dataset.query || '';
+  }
+  applyFilters();
 });
 
 document.getElementById('radius')?.addEventListener('touchstart', ()=> map?.dragging?.disable());
