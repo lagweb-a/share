@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>無料で会員登録 | Lagrangelo web開発チーム</title>
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css')}}">
+</head>
+<body class="auth-page">
+  <div class="nav">
+    <div class="nav-inner">
+      <div class="brand">
+        <span class="badge" aria-hidden="true"></span>
+        <span>Lagrangelo web開発チーム</span>
+      </div>
+      <div class="nav-auth">
+        <a class="login" href="{{ url_for('index') }}">ログイン画面へ戻る</a>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <div class="wrap">
+      <div class="auth-card" role="region" aria-labelledby="signupTitle">
+        <h1 id="signupTitle" style="margin:0">無料で会員登録</h1>
+        <p class="auth-page__lead">必要事項をご入力いただき、登録後は前の画面に戻ってログインしてください。</p>
+        <div id="signupError" class="auth-page__error" role="alert" hidden></div>
+        <div id="signupMessage" class="auth-page__message" role="status" hidden>会員登録が完了しました。ログイン画面に戻ってサインインしてください。</div>
+        <form id="signupForm" class="auth-modal__form" autocomplete="on">
+          <label class="auth-modal__label">お名前（マイページに表示されます）
+            <input type="text" name="displayName" required maxlength="40" />
+          </label>
+          <label class="auth-modal__label">メールアドレス
+            <input type="email" name="email" required autocomplete="email" />
+          </label>
+          <label class="auth-modal__label">パスワード（6文字以上）
+            <input type="password" name="password" required autocomplete="new-password" minlength="6" />
+          </label>
+          <button type="submit" class="btn primary auth-modal__submit">無料で会員登録</button>
+        </form>
+        <div class="auth-page__footer">
+          <a class="btn ghost" href="{{ url_for('index') }}">← ログイン画面へ戻る</a>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>© 2025 Lagrangelo web開発チーム</footer>
+
+  <script type="module">
+    import { doSignup } from "{{ url_for('static', filename='js/firebase-auth.js') }}";
+
+    const signupForm = document.getElementById('signupForm');
+    const messageBox = document.getElementById('signupMessage');
+    const errorBox = document.getElementById('signupError');
+
+    const showMessage = (el, text) => {
+      if (!el) return;
+      el.textContent = text;
+      el.hidden = false;
+    };
+
+    const hideMessage = (el) => {
+      if (!el) return;
+      el.hidden = true;
+      el.textContent = '';
+    };
+
+    signupForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      hideMessage(errorBox);
+      hideMessage(messageBox);
+
+      const form = event.currentTarget;
+      const displayName = form.displayName?.value?.trim();
+      const email = form.email?.value?.trim();
+      const password = form.password?.value || '';
+
+      if (!displayName || !email || !password) {
+        showMessage(errorBox, 'お名前・メールアドレス・パスワードを入力してください。');
+        return;
+      }
+
+      const submitBtn = form.querySelector('button[type="submit"]');
+
+      try {
+        submitBtn?.setAttribute('disabled', 'disabled');
+        await doSignup(email, password, displayName);
+        form.reset();
+        form.setAttribute('hidden', 'hidden');
+        showMessage(messageBox, '会員登録が完了しました。ログイン画面に戻ってサインインしてください。');
+      } catch (error) {
+        console.error(error);
+        submitBtn?.removeAttribute('disabled');
+        const message = error?.message?.includes('email')
+          ? 'このメールアドレスは既に登録済みの可能性があります。'
+          : '新規登録に失敗しました。入力内容をご確認ください。';
+        showMessage(errorBox, message);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -39,10 +39,6 @@
   <div class="auth-modal__body" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
     <button type="button" class="auth-modal__close" data-close aria-label="閉じる">×</button>
     <h2 id="authModalTitle">ログイン / 新規登録</h2>
-    <div class="auth-modal__tabs" role="tablist">
-      <button type="button" class="auth-modal__tab is-active" data-auth-tab="login" role="tab">ログイン</button>
-      <button type="button" class="auth-modal__tab" data-auth-tab="signup" role="tab">新規登録</button>
-    </div>
     <form id="loginForm" class="auth-modal__form" autocomplete="on">
       <label class="auth-modal__label">メールアドレス
         <input type="email" name="email" required autocomplete="email" />
@@ -52,18 +48,10 @@
       </label>
       <button type="submit" class="btn primary auth-modal__submit">ログイン</button>
     </form>
-    <form id="signupForm" class="auth-modal__form" hidden autocomplete="on">
-      <label class="auth-modal__label">お名前（マイページに表示されます）
-        <input type="text" name="displayName" required maxlength="40" />
-      </label>
-      <label class="auth-modal__label">メールアドレス
-        <input type="email" name="email" required autocomplete="email" />
-      </label>
-      <label class="auth-modal__label">パスワード（6文字以上）
-        <input type="password" name="password" required autocomplete="new-password" minlength="6" />
-      </label>
-      <button type="submit" class="btn primary auth-modal__submit">新規登録</button>
-    </form>
+    <div class="auth-modal__footer">
+      <p style="margin:0;">アカウントをお持ちでない方はこちら</p>
+      <a class="btn ghost" href="{{ url_for('signup_page') }}">アカウントを持っていない人は無料で会員登録</a>
+    </div>
   </div>
 </div>
 
@@ -207,13 +195,9 @@
     if (!authModal) {
       return;
     }
-     const loginForm = document.getElementById('loginForm');
-    const signupForm = document.getElementById('signupForm');
+    const loginForm = document.getElementById('loginForm'); 
     const logoutButton = document.getElementById('logoutButton');
-    const tabButtons = Array.from(authModal.querySelectorAll('[data-auth-tab]'));
     const openButtons = Array.from(document.querySelectorAll('[data-open-auth]'));
-
-    let currentMode = 'login';
 
     const loadFirebaseModule = (() => {
       let cache = null;
@@ -225,53 +209,25 @@
       };
     })();
 
-    const setMode = (mode) => {
-      currentMode = mode === 'signup' ? 'signup' : 'login';
-      if (loginForm) {
-        loginForm.hidden = currentMode !== 'login';
-      }
-      if (signupForm) {
-        signupForm.hidden = currentMode !== 'signup';
-      }
-      tabButtons.forEach((btn) => {
-        btn.classList.toggle('is-active', btn.dataset.authTab === currentMode);
-      });
+    const focusEmailField = () => {
+      loginForm?.querySelector('input[name="email"]')?.focus();
     };
 
-    const focusInitialField = () => {
-      if (currentMode === 'login') {
-        loginForm?.querySelector('input[name="email"]')?.focus();
-      } else {
-        signupForm?.querySelector('input[name="displayName"]')?.focus();
-      }
-    };
-
-    const openModal = (mode = 'login') => {
-      setMode(mode);
+    const openModal = () => {
       authModal.hidden = false;
       document.body.classList.add('modal-open');
-      focusInitialField();
+      requestAnimationFrame(() => focusEmailField());
     };
 
     const closeModal = () => {
       authModal.hidden = true;
       document.body.classList.remove('modal-open');
       loginForm?.reset();
-      signupForm?.reset();
-      setMode('login');
     };
-
-    tabButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
-        setMode(btn.dataset.authTab === 'signup' ? 'signup' : 'login');
-        focusInitialField();
-      });
-    });
 
     openButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
-        const mode = btn.dataset.authMode === 'signup' ? 'signup' : 'login';
-        openModal(mode);
+        openModal();
       });
     });
 
@@ -306,26 +262,6 @@
       }
     });
 
-    signupForm?.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const form = event.currentTarget;
-      const displayName = form.displayName?.value?.trim();
-      const email = form.email?.value?.trim();
-      const password = form.password?.value || '';
-      if (!displayName || !email || !password) {
-        alert('お名前・メールアドレス・パスワードを入力してください。');
-        return;
-      }
-      try {
-        const mod = await loadFirebaseModule();
-        await mod.doSignup(email, password, displayName);
-        alert('会員登録が完了しました。引き続きログイン状態でご利用いただけます。');
-      } catch (error) {
-        console.error(error);
-        alert('新規登録に失敗しました。入力内容をご確認ください。');
-      }
-    });
-
     logoutButton?.addEventListener('click', async () => {
       try {
         const mod = await loadFirebaseModule();
@@ -339,8 +275,6 @@
       const detail = event.detail || {};
       if (detail.user) {
         closeModal();
-      } else {
-        setMode('login');
       }
     });
   })();

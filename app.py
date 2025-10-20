@@ -352,6 +352,10 @@ def build_geo_tree(spots: List[Dict]) -> Dict[str, Dict]:
 def index():
     return render_template("index.html")
 
+@app.route("/signup")
+def signup_page():
+    return render_template("signup.html")
+
 @app.route("/api/spots")
 def api_spots():
     q = (request.args.get("q") or "").strip().lower()
