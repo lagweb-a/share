@@ -20,8 +20,11 @@ body{
             display:flex; align-items:center; justify-content:space-between; gap:12px }
 .brand{ display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.02em; }
 .brand .badge{ width:28px; height:28px; border-radius:8px; background:linear-gradient(135deg,var(--accent),var(--accent-2)) }
+.nav-auth{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end }
+.user-greeting{ font-weight:600; color:#1f2937 }
 .login{ display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:999px;
         background:#111827; color:#fff; text-decoration:none; font-weight:700 }
+button.login{ border:none; cursor:pointer }        
 
 .auth-card{
   background:var(--card);
@@ -40,6 +43,24 @@ body{
   font-size:15px;
 }
 .auth-card button{ cursor:pointer }
+
+.auth-modal{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; z-index:200 }
+.auth-modal[hidden]{ display:none }
+.auth-modal__overlay{ position:absolute; inset:0; background:#0f172a99 }
+.auth-modal__body{ position:relative; z-index:1; background:#fff; border-radius:24px; padding:26px 24px 28px; width:min(420px,100%);
+  display:grid; gap:18px; box-shadow:var(--shadow); border:1px solid var(--border) }
+.auth-modal__close{ position:absolute; top:14px; right:14px; border:none; background:transparent; font-size:20px; cursor:pointer;
+  color:#475569 }
+.auth-modal__tabs{ display:flex; gap:10px }
+.auth-modal__tab{ flex:1; padding:10px 12px; border-radius:999px; border:1px solid var(--border); background:#f8fafc; font-weight:600;
+  color:#1f2a44; cursor:pointer; transition:background .15s ease, color .15s ease }
+.auth-modal__tab.is-active{ background:linear-gradient(180deg,var(--accent),var(--accent-2)); color:#fff; border-color:transparent;
+  box-shadow:0 6px 16px #3b82f633 }
+.auth-modal__form{ display:grid; gap:12px }
+.auth-modal__label{ display:grid; gap:6px; font-size:14px; color:#1f2a44 }
+.auth-modal__label input{ padding:12px 14px; border:1px solid var(--border); border-radius:12px; font-size:15px }
+.auth-modal__submit{ justify-content:center }
+body.modal-open{ overflow:hidden }
 
 .search-history-card{
   border-top:1px solid var(--border);

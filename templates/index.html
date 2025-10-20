@@ -24,8 +24,47 @@
       <span class="badge" aria-hidden="true"></span>
       <span>Lagrangelo web開発チーム</span>
     </div>
-    <a class="login" data-guest href="#login" onclick="event.preventDefault(); document.getElementById('memberLoginEmail')?.focus();">ログイン</a>
-    <button class="login" data-member hidden type="button" onclick="import('{{ url_for('static', filename='js/firebase-auth.js') }}").then(m => m.doLogout()).catch(console.error)">ログアウト</button>
+    <div class="nav-auth">
+      <span class="user-greeting" data-guest>ゲストさん</span>
+      <span class="user-greeting" data-member hidden data-user-greeting></span>
+      <button id="openAuthModal" class="login" data-guest data-open-auth type="button">ログイン / 新規登録</button>
+      <button id="logoutButton" class="login" data-member hidden type="button">ログアウト</button>
+    </div>
+  </div>
+</div>
+
+<!-- Auth Modal -->
+<div id="authModal" class="auth-modal" hidden>
+  <div class="auth-modal__overlay" data-close></div>
+  <div class="auth-modal__body" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+    <button type="button" class="auth-modal__close" data-close aria-label="閉じる">×</button>
+    <h2 id="authModalTitle">ログイン / 新規登録</h2>
+    <div class="auth-modal__tabs" role="tablist">
+      <button type="button" class="auth-modal__tab is-active" data-auth-tab="login" role="tab">ログイン</button>
+      <button type="button" class="auth-modal__tab" data-auth-tab="signup" role="tab">新規登録</button>
+    </div>
+    <form id="loginForm" class="auth-modal__form" autocomplete="on">
+      <label class="auth-modal__label">メールアドレス
+        <input type="email" name="email" required autocomplete="email" />
+      </label>
+      <label class="auth-modal__label">パスワード
+        <input type="password" name="password" required autocomplete="current-password" minlength="6" />
+      </label>
+      <button type="submit" class="btn primary auth-modal__submit">ログイン</button>
+    </form>
+    <form id="signupForm" class="auth-modal__form" hidden autocomplete="on">
+      <label class="auth-modal__label">お名前（マイページに表示されます）
+        <input type="text" name="displayName" required maxlength="40" />
+      </label>
+      <label class="auth-modal__label">メールアドレス
+        <input type="email" name="email" required autocomplete="email" />
+      </label>
+      <label class="auth-modal__label">パスワード（6文字以上）
+        <input type="password" name="password" required autocomplete="new-password" minlength="6" />
+      </label>
+      <button type="submit" class="btn primary auth-modal__submit">新規登録</button>
+    </form>
+  </div>
 </div>
 
 <!-- Auth Switcher -->
@@ -33,12 +72,8 @@
   <div class="wrap" style="padding-top:12px;">
     <div class="auth-card">
       <h2 style="margin:0">ゲスト向けコンテンツ</h2>
-      <p style="margin:4px 0 0; color:#475569;">ログインすると会員機能（お気に入り・コメント・検索履歴）が使えます。</p>
-      <form id="memberLoginForm">
-        <input id="memberLoginEmail" name="email" type="email" placeholder="Email" required />
-        <input id="memberLoginPassword" name="password" type="password" placeholder="Password" required />
-        <button type="submit" class="btn primary" style="justify-content:center">ログイン</button>
-      </form>
+      <p style="margin:4px 0 12px; color:#475569;">ログインすると会員機能（お気に入り・コメント・検索履歴）が使えます。</p>
+      <button type="button" class="btn primary" style="justify-content:center" data-open-auth>ログイン / 新規登録</button>
     </div>
   </div>
 </section>
@@ -49,48 +84,7 @@
       <h2 style="margin:0">会員向けコンテンツ</h2>
       <p style="margin:4px 0 12px; color:#475569;">Firebaseで認証された会員さま向けの情報です。</p>
       <pre id="member-content" style="margin:0; white-space:pre-wrap; background:#f1f5f9; padding:12px; border-radius:12px; font-size:13px; max-height:180px; overflow:auto;"></pre>
-      <div>
-        <!-- index.html -->
-
-
-<!-- Nav 内の例 -->
-<a class="login"  data-guest href="#login" onclick="openLoginModal()">ログイン</a>
-<button class="signup" data-guest type="button" onclick="signup()">新規登録</button>
-
-<button class="logout" data-member hidden type="button" onclick="doLogout()">
-  ログアウト
-</button>
-
-<!-- ボタン例 -->
-<button type="button" onclick="signup()">新規登録</button>
-
-<script type="module">
-  import { getAuth, createUserWithEmailAndPassword, sendEmailVerification } 
-    from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
-
-  const app = initializeApp({ 
-  apiKey: "AIzaSyBZabUBc38cEJkjhgLFeuenlwzivKrlhfM",
-  authDomain: "lagrangero-group4.firebaseapp.com",
-  projectId: "lagrangero-group4",
-});
-  const auth = getAuth(app);
-
-  // 入力は適宜 document.getElementById('signupEmail') などから取得してね
-  window.signup = async () => {
-    const email = prompt('メールアドレス');      // ←仮のUI。実際はフォームでOK
-    const pass  = prompt('パスワード(6文字以上)');
-    const cred = await createUserWithEmailAndPassword(auth, email, pass);
-    // 任意: メール認証を使いたい場合
-    // await sendEmailVerification(cred.user);
-    alert('登録完了！このまま会員UIに切り替わります');
-  };
-</script>
-
-<!-- ページの最後に追加 -->
-<script type="module" src="{{ url_for('static', filename='js/firebase-auth.js') }}"></script>
-
-      </div>
+      
     </div>
   </div>
 </section>
@@ -208,23 +202,148 @@
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="{{url_for('static', filename='index.js')}}"></script>
 <script>
-  document.getElementById('memberLoginForm')?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const email = form.email?.value?.trim();
-    const password = form.password?.value;
-    if (!email || !password) {
-      alert('メールアドレスとパスワードを入力してください。');
+  (() => {
+    const authModal = document.getElementById('authModal');
+    if (!authModal) {
       return;
     }
-    try {
-      const mod = await import('{{ url_for('static', filename='js/firebase-auth.js') }}');
-      await mod.doLogin(email, password);
-    } catch (error) {
-      console.error(error);
-      alert('ログインに失敗しました。入力内容をご確認ください。');
-    }
-  });
+     const loginForm = document.getElementById('loginForm');
+    const signupForm = document.getElementById('signupForm');
+    const logoutButton = document.getElementById('logoutButton');
+    const tabButtons = Array.from(authModal.querySelectorAll('[data-auth-tab]'));
+    const openButtons = Array.from(document.querySelectorAll('[data-open-auth]'));
+
+    let currentMode = 'login';
+
+    const loadFirebaseModule = (() => {
+      let cache = null;
+      return async () => {
+        if (!cache) {
+          cache = await import('{{ url_for('static', filename='js/firebase-auth.js') }}');
+        }
+        return cache;
+      };
+    })();
+
+    const setMode = (mode) => {
+      currentMode = mode === 'signup' ? 'signup' : 'login';
+      if (loginForm) {
+        loginForm.hidden = currentMode !== 'login';
+      }
+      if (signupForm) {
+        signupForm.hidden = currentMode !== 'signup';
+      }
+      tabButtons.forEach((btn) => {
+        btn.classList.toggle('is-active', btn.dataset.authTab === currentMode);
+      });
+    };
+
+    const focusInitialField = () => {
+      if (currentMode === 'login') {
+        loginForm?.querySelector('input[name="email"]')?.focus();
+      } else {
+        signupForm?.querySelector('input[name="displayName"]')?.focus();
+      }
+    };
+
+    const openModal = (mode = 'login') => {
+      setMode(mode);
+      authModal.hidden = false;
+      document.body.classList.add('modal-open');
+      focusInitialField();
+    };
+
+    const closeModal = () => {
+      authModal.hidden = true;
+      document.body.classList.remove('modal-open');
+      loginForm?.reset();
+      signupForm?.reset();
+      setMode('login');
+    };
+
+    tabButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        setMode(btn.dataset.authTab === 'signup' ? 'signup' : 'login');
+        focusInitialField();
+      });
+    });
+
+    openButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const mode = btn.dataset.authMode === 'signup' ? 'signup' : 'login';
+        openModal(mode);
+      });
+    });
+
+    authModal.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-close]')) {
+        closeModal();
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !authModal.hidden) {
+        closeModal();
+      }
+    });
+
+    loginForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const email = form.email?.value?.trim();
+      const password = form.password?.value || '';
+      if (!email || !password) {
+        alert('メールアドレスとパスワードを入力してください。');
+        return;
+      }
+      try {
+        const mod = await loadFirebaseModule();
+        await mod.doLogin(email, password);
+      } catch (error) {
+        console.error(error);
+        alert('ログインに失敗しました。入力内容をご確認ください。');
+      }
+    });
+
+    signupForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const displayName = form.displayName?.value?.trim();
+      const email = form.email?.value?.trim();
+      const password = form.password?.value || '';
+      if (!displayName || !email || !password) {
+        alert('お名前・メールアドレス・パスワードを入力してください。');
+        return;
+      }
+      try {
+        const mod = await loadFirebaseModule();
+        await mod.doSignup(email, password, displayName);
+        alert('会員登録が完了しました。引き続きログイン状態でご利用いただけます。');
+      } catch (error) {
+        console.error(error);
+        alert('新規登録に失敗しました。入力内容をご確認ください。');
+      }
+    });
+
+    logoutButton?.addEventListener('click', async () => {
+      try {
+        const mod = await loadFirebaseModule();
+        await mod.doLogout();
+      } catch (error) {
+        console.error(error);
+      }
+    });
+
+    window.addEventListener('firebase-auth-state', (event) => {
+      const detail = event.detail || {};
+      if (detail.user) {
+        closeModal();
+      } else {
+        setMode('login');
+      }
+    });
+  })();
 </script>
 </body>
 </html>

@@ -1,5 +1,12 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
+import {
+  getAuth,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  createUserWithEmailAndPassword,
+  updateProfile,
+} from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBZabUBc38cEJkjhgLFeuenlwzivKrlhfM",
@@ -10,23 +17,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 
-window.doLogout = async function() {
-  await signOut(auth);
-  alert("ログアウトしました");
-};
-
-// 新規登録関数
-window.signup = async () => {
-  const email = prompt('メールアドレスを入力してください');
-  const pass  = prompt('パスワード（6文字以上）を入力してください');
-  try {
-    const cred = await createUserWithEmailAndPassword(auth, email, pass);
-    alert('会員登録が完了しました！ログイン状態になっています。');
-  } catch (err) {
-    alert('登録エラー: ' + err.message);
-  }
-};
-
+const memberGreetingEl = document.querySelector('[data-user-greeting]');
 function showMember(on) {
   document.querySelectorAll('[data-member]').forEach((el) => {
     el.hidden = !on;
@@ -37,6 +28,16 @@ function showMember(on) {
 }
 
 showMember(false);
+
+function updateGreeting(user) {
+  if (!memberGreetingEl) return;
+  if (!user) {
+    memberGreetingEl.textContent = '';
+    return;
+  }
+  const name = (user.displayName || '').trim() || (user.email ? user.email.split('@')[0] : '会員');
+  memberGreetingEl.textContent = `${name}さんのマイページ`;
+}
 
 function renderMemberProbe(info) {
   const box = document.querySelector('#member-content');
@@ -66,6 +67,7 @@ async function emitAuthState(user, idToken) {
 async function handleAuthState(user) {
   if (!user) {
     showMember(false);
+    updateGreeting(null);
     renderMemberProbe(null);
     await emitAuthState(null, null);
     return;
@@ -80,17 +82,20 @@ async function handleAuthState(user) {
     });
     if (!res.ok) {
       showMember(false);
+      updateGreeting(null);
       renderMemberProbe(null);
       await emitAuthState(null, null);
       return;
     }
     const data = await res.json().catch(() => null);
     showMember(true);
+    updateGreeting(user);
     renderMemberProbe(data);
     await emitAuthState(user, idToken);
   } catch (error) {
     console.error('Failed to verify member session', error);
     showMember(false);
+    updateGreeting(null);
     renderMemberProbe(null);
     await emitAuthState(null, null);
   }
@@ -107,8 +112,25 @@ export async function doLogin(email, password) {
   await signInWithEmailAndPassword(auth, email, password);
 }
 
+export async function doSignup(email, password, displayName) {
+  if (!email || !password || !displayName) {
+    throw new Error('displayName, email and password are required');
+  }
+  const cred = await createUserWithEmailAndPassword(auth, email, password);
+  try {
+    await updateProfile(cred.user, { displayName: displayName.trim() });
+  } catch (error) {
+    console.warn('Failed to update displayName', error);
+  }
+  return cred.user;
+}
+
 export async function doLogout() {
+  if (!window.confirm('本当にログアウトしてもいいですか？')) {
+    return;
+  }
   await signOut(auth);
+  window.alert('ログアウトしました。');
 }
 
 export function getCurrentUser() {
@@ -124,6 +146,7 @@ export async function getCurrentIdToken(forceRefresh = false) {
 window.firebaseAuth = {
   auth,
   doLogin,
+  doSignup,
   doLogout,
   getCurrentUser,
   getCurrentIdToken,
