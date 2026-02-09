@@ -195,9 +195,19 @@ input[type="range"]{ touch-action:none }
 a.link-on-dark{ color:#93c5fd }
 
   /* Toast */
-.toast{ position:fixed; left:50%; transform:translateX(-50%); bottom:calc(16px + var(--safe-bottom)); background:#111827; color:#fff;
-        transition:opacity .2s, transform .2s; z-index:9999 }
-.toast.show{ opacity:1; transform:translateX(-50%) translateY(-4px) }
+  .toast{
+    position:fixed; left:50%; transform:translateX(-50%);
+    bottom:calc(16px + var(--safe-bottom));
+    background:#111827; color:#fff;
+    padding:10px 14px; border-radius:10px; font-weight:600;
+    opacity:0; pointer-events:none;
+    transition:opacity .25s ease, transform .25s ease;
+    z-index:9999;
+  }
+  .toast.show{
+    opacity:1; pointer-events:auto;
+    transform:translateX(-50%) translateY(-4px);
+  }
 
 .auth-page{ min-height:100%; display:flex; flex-direction:column }
 .auth-page main{ flex:1; display:flex; align-items:center; justify-content:center; padding:32px 16px calc(32px + var(--safe-bottom)); }
