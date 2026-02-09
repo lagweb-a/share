@@ -28,34 +28,44 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///reviews.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
-def init_firebase_admin():
-   """
-+    1) 環境変数 FIREBASE_SERVICE_ACCOUNT_JSON にJSON文字列が入っていればそれを使う
-+    2) 無ければ app.py と同じ階層の serviceAccountKey.json を読み込む
-+    """
-cred_obj = None
-sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
-if sa_json:
-    try:
-        cred_obj = credentials.Certificate(json.loads(sa_json))
-        print("[firebase] using credentials from env var")
-    except Exception as e:
-        print("[firebase] env var set but invalid JSON:", e)
 
-if cred_obj is None:
-    key_path = pathlib.Path(__file__).with_name("serviceAccountKey.json")
-    if not key_path.exists():
-        raise RuntimeError(
-            "FIREBASE_SERVICE_ACCOUNT_JSON is not set and "
-            f"{key_path.name} not found next to app.py"
-      )
+
+# ---------------------------
+# Firebase Admin init / verify (FIXED)
+# ---------------------------
+def init_firebase_admin():
+    """
+    1) 環境変数 FIREBASE_SERVICE_ACCOUNT_JSON にJSON文字列が入っていればそれを使う
+    2) 無ければ app.py と同じ階層の serviceAccountKey.json を読み込む
+    """
+    cred_obj = None
+
+    # 1) env var JSON
+    sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
+    if sa_json:
+        try:
+            cred_obj = credentials.Certificate(json.loads(sa_json))
+            print("[firebase] using credentials from env var")
+        except Exception as e:
+            print("[firebase] env var set but invalid JSON:", repr(e))
+
+    # 2) local file
+    if cred_obj is None:
+        key_path = pathlib.Path(__file__).with_name("serviceAccountKey.json")
+        if not key_path.exists():
+            raise RuntimeError(
+                "FIREBASE_SERVICE_ACCOUNT_JSON is not set and "
+                f"{key_path.name} not found next to app.py"
+            )
         cred_obj = credentials.Certificate(str(key_path))
         print(f"[firebase] using credentials file: {key_path}")
 
-try:
-    firebase_admin.get_app()
-except ValueError:
-    firebase_admin.initialize_app(cred_obj)
+    # initialize app once
+    try:
+        firebase_admin.get_app()
+    except ValueError:
+        firebase_admin.initialize_app(cred_obj)
+
 
 # ← アプリ起動時に一度だけ初期化
 init_firebase_admin()
@@ -65,13 +75,25 @@ def verify_firebase_id_token():
     """Authorization: Bearer <ID_TOKEN> を検証。成功時は dict を返す。"""
     authz = request.headers.get("Authorization", "")
     if not authz.startswith("Bearer "):
+        # ここは静かに None（仕様を変えない）
         return None
+
     id_token = authz.split(" ", 1)[1].strip()
     if not id_token:
         return None
+
+    # JWTっぽいか簡易チェック（3セグメント）
+    if id_token.count(".") != 2:
+        print("[auth] token format invalid (not JWT-like).")
+        return None
+
     try:
-        return fb_auth.verify_id_token(id_token)
-    except Exception:
+        decoded = fb_auth.verify_id_token(id_token)
+        return decoded
+    except Exception as e:
+        # 失敗理由を握りつぶすと永遠に原因が分からないのでログだけ出す
+        # トークン全文は出さない（漏洩防止）
+        print("[auth] verify_id_token failed:", repr(e))
         return None
 
 
@@ -117,6 +139,7 @@ def _trim_search_history(uid: str, keep: int = 20) -> None:
         db.session.delete(row)
 
 
+
 @app.get("/api/public")
 def public_api():
     return jsonify({"ok": True})
@@ -132,6 +155,8 @@ def member_only():
         "email": user.get("email"),
     }
     return json_no_store(payload)
+
+
 DATA_PATH = Path(__file__).parent / "data" / "data.csv"
 
 # 地方と都道府県のメタデータ（代表座標は県庁所在地付近）
@@ -235,6 +260,7 @@ def compute_bbox(coords: List[Tuple[float, float]]):
     lons = [lon for lat, lon in coords]
     return [min(lons), min(lats), max(lons), max(lats)]
 
+
 def compute_center_radius(
     coords: List[Tuple[float, float]], fallback_center: List[float]
 ):
@@ -250,6 +276,7 @@ def compute_center_radius(
     radius_m = int((max_distance_km + 5) * 1000)
     bbox = compute_bbox(valid)
     return center, radius_m, bbox
+
 
 def load_spots():
     # CSVをDataFrameとして読み込み
@@ -352,9 +379,11 @@ def build_geo_tree(spots: List[Dict]) -> Dict[str, Dict]:
 def index():
     return render_template("index.html")
 
+
 @app.route("/signup")
 def signup_page():
     return render_template("signup.html")
+
 
 @app.route("/api/spots")
 def api_spots():
@@ -379,6 +408,7 @@ def api_geo():
     spots = load_spots()
     tree = build_geo_tree(spots)
     return jsonify(tree)
+
 
 @app.post("/api/favorites/add")
 @login_required
@@ -516,16 +546,17 @@ def save_search_query():
     if not query_text:
         return json_no_store({"error": "query required"}, 400)
 
-    existing = SearchHistory.query.filter_by(uid=uid, query=query_text).first()
+    existing = SearchHistory.query.filter_by(uid=uid, query_text=query_text).first()
     now = datetime.utcnow()
     if existing:
         existing.created_at = now
     else:
-        db.session.add(SearchHistory(uid=uid, query=query_text, created_at=now))
+        db.session.add(SearchHistory(uid=uid, query_text=query_text, created_at=now))
     db.session.flush()
     _trim_search_history(uid)
     db.session.commit()
     return json_no_store({"ok": True})
+
 
 
 @app.get("/api/search-history")
@@ -541,10 +572,12 @@ def list_queries():
         .all()
     )
     items = [
-        {"query": r.query, "created_at": r.created_at.isoformat()}
+        {"query": r.query_text, "created_at": r.created_at.isoformat()}
         for r in records
     ]
     return json_no_store({"queries": items})
+
+
 
 # ---- API ----
 @app.route("/api/reviews", methods=["POST"])
@@ -556,7 +589,7 @@ def post_review():
     comment = data.get("comment", "")
     rating = int(data.get("rating", 0))
     created_at = datetime.utcnow()
-    print("たのむよー")
+
     # 1. DB保存
     r = Review(
         author=author,
@@ -578,6 +611,7 @@ def post_review():
 
     return jsonify({"success": True, "id": r.id}), 201
 
+
 @app.route("/api/reviews", methods=["GET"])
 def get_reviews():
     reviews = Review.query.order_by(Review.created_at.desc()).all()
@@ -592,6 +626,7 @@ def get_reviews():
         for r in reviews
     ])
 
+
 @app.route("/api/reviews/<int:rid>", methods=["PUT"])
 def update_review(rid):
     r = Review.query.get_or_404(rid)
@@ -602,12 +637,14 @@ def update_review(rid):
     db.session.commit()
     return jsonify({"success": True})
 
+
 @app.route("/api/reviews/<int:rid>", methods=["DELETE"])
 def delete_review(rid):
     r = Review.query.get_or_404(rid)
     db.session.delete(r)
     db.session.commit()
     return jsonify({"success": True})
+
 
 # Reviewモデル
 class Review(db.Model):
@@ -616,6 +653,7 @@ class Review(db.Model):
     comment = db.Column(db.Text, nullable=False)
     rating = db.Column(db.Integer, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 
 class Favorite(db.Model):
     __tablename__ = "favorites"
@@ -648,12 +686,13 @@ class SearchHistory(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     uid = db.Column(db.String(128), nullable=False, index=True)
-    query = db.Column(db.String(255), nullable=False)
+    query_text = db.Column(db.String(255), nullable=False)  # ← query をやめる
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
 with app.app_context():
     db.create_all()
+
 
 # Google Sheets認証
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
@@ -664,6 +703,7 @@ creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
 gc = gspread.authorize(creds)
 sh = gc.open_by_key(SPREADSHEET_ID)
 worksheet = sh.sheet1
+
 
 if __name__ == "__main__":
     # 開発用：自動リロード
