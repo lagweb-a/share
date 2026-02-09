@@ -417,7 +417,7 @@ def favorites_add():
     if not uid:
         return json_no_store({"error": "invalid-token"}, 401)
     data = request.get_json(silent=True) or {}
-    item_id = (data.get("item_id") or "").strip()
+    item_id = str(data.get("item_id") or "").strip()
     if not item_id:
         return json_no_store({"error": "item_id required"}, 400)
 
@@ -459,7 +459,7 @@ def favorites_remove():
     if not uid:
         return json_no_store({"error": "invalid-token"}, 401)
     data = request.get_json(silent=True) or {}
-    item_id = (data.get("item_id") or "").strip()
+    item_id = str(data.get("item_id") or "").strip()
     if not item_id:
         return json_no_store({"error": "item_id required"}, 400)
 
@@ -477,10 +477,11 @@ def post_member_comment():
     if not uid:
         return json_no_store({"error": "invalid-token"}, 401)
     data = request.get_json(force=True) or {}
-    target_id = (data.get("target_id") or "").strip()
-    target_name = (data.get("target_name") or "").strip() or None
-    author = (data.get("author") or "").strip() or None
-    body = (data.get("body") or "").strip()
+    # coerce to str because clients may send numeric IDs; avoid AttributeError on .strip()
+    target_id = str(data.get("target_id") or "").strip()
+    target_name = (str(data.get("target_name") or "").strip() or None)
+    author = (str(data.get("author") or "").strip() or None)
+    body = str(data.get("body") or "").strip()
     rating = int(data.get("rating") or 0)
     if not target_id or not body:
         return json_no_store({"error": "target_id and body required"}, 400)
@@ -506,6 +507,23 @@ def post_member_comment():
         "rating": comment.rating,
         "created_at": comment.created_at.isoformat(),
     }
+    # 2. スプレッドシートへ追記（失敗しても処理を止めない）
+    try:
+        print("Google Sheets: append member comment")
+        worksheet.append_row([
+            str(comment.id),
+            str(comment.target_id),
+            str(comment.target_name or ""),
+            str(comment.uid or ""),
+            str(comment.author or ""),
+            str(comment.body or ""),
+            str(comment.rating),
+            str(comment.created_at.isoformat()),
+        ])
+    except Exception as e:
+        # ログに型名とメッセージを出す（詳細な認証情報は出さない）
+        print("Google Sheets保存エラー (member comment):", type(e).__name__, str(e))
+
     return json_no_store(payload, 201)
 
 
@@ -542,7 +560,7 @@ def save_search_query():
     if not uid:
         return json_no_store({"error": "invalid-token"}, 401)
     data = request.get_json(silent=True) or {}
-    query_text = (data.get("query") or "").strip()
+    query_text = str(data.get("query") or "").strip()
     if not query_text:
         return json_no_store({"error": "query required"}, 400)
 
@@ -631,8 +649,8 @@ def get_reviews():
 def update_review(rid):
     r = Review.query.get_or_404(rid)
     data = request.get_json(force=True) or {}
-    if "author" in data:  r.author  = data["author"].strip()
-    if "comment" in data: r.comment = data["comment"].strip()
+    if "author" in data:  r.author  = str(data["author"]).strip()
+    if "comment" in data: r.comment = str(data["comment"]).strip()
     if "rating" in data:  r.rating  = int(data["rating"])
     db.session.commit()
     return jsonify({"success": True})
