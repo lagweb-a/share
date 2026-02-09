@@ -660,10 +660,27 @@ async function openPanelFor(p){
   const ratingInput = document.getElementById('ratingInput');
   const ratingValue = document.getElementById('ratingValue');
   ratingInput.querySelectorAll('.star-btn').forEach(btn=>{
+    // click: set rating and mark active stars
     btn.addEventListener('click', ()=>{
       const v = +btn.dataset.v;
       ratingValue.value = v;
-      ratingInput.querySelectorAll('.star-btn').forEach(b=> b.classList.toggle('active', +b.dataset.v <= v));
+      ratingInput.querySelectorAll('.star-btn').forEach(b=>{
+        const active = (+b.dataset.v <= v);
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+    });
+    // hover preview: show preview class while hovering
+    btn.addEventListener('mouseenter', ()=>{
+      const pv = +btn.dataset.v;
+      ratingInput.querySelectorAll('.star-btn').forEach(b=> b.classList.toggle('preview', +b.dataset.v <= pv));
+    });
+    btn.addEventListener('mouseleave', ()=>{
+      ratingInput.querySelectorAll('.star-btn').forEach(b=> b.classList.remove('preview'));
+    });
+    // keyboard: support Enter/Space to activate
+    btn.addEventListener('keydown', (ev)=>{
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); btn.click(); }
     });
   });
   const form = document.getElementById('panelCommentForm');

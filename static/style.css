@@ -209,6 +209,17 @@ a.link-on-dark{ color:#93c5fd }
     transform:translateX(-50%) translateY(-4px);
   }
 
+  /* Rating stars in comment form */
+  .rating-input{ display:flex; align-items:center; gap:8px }
+  .rating-input .star-btn{
+    background:transparent; border:none; color:var(--muted); font-size:20px; line-height:1; cursor:pointer; padding:6px; border-radius:6px;
+    transition:color .12s ease, transform .12s ease, background .12s ease;
+  }
+  .rating-input .star-btn:hover{ color:#fbbf24; transform:translateY(-2px); }
+  .rating-input .star-btn:focus{ outline:2px solid #fbbf24; outline-offset:2px; }
+  .rating-input .star-btn.active{ color:#f59e0b; transform:scale(1.08); }
+  .rating-input .star-btn.preview{ color:#fcd34d; }
+
 .auth-page{ min-height:100%; display:flex; flex-direction:column }
 .auth-page main{ flex:1; display:flex; align-items:center; justify-content:center; padding:32px 16px calc(32px + var(--safe-bottom)); }
 .auth-page .wrap{ width:min(100%,420px); margin:0 auto; padding:0 16px }
