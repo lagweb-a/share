@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+import requests
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 
@@ -222,7 +223,7 @@ REGION_PRESET = {
 }
 
 PREFECTURE_NAMES = list(PREF_REGION_INFO.keys())
-
+BOUNDARY_CACHE: Dict[str, Optional[Dict]] = {}
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """2地点間の距離（km）を計算"""
@@ -408,6 +409,58 @@ def api_geo():
     spots = load_spots()
     tree = build_geo_tree(spots)
     return jsonify(tree)
+
+
+def _fetch_boundary_geojson(query: str) -> Optional[Dict]:
+    cached = BOUNDARY_CACHE.get(query)
+    if cached is not None:
+        return cached
+
+    try:
+        response = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={
+                "q": query,
+                "format": "jsonv2",
+                "polygon_geojson": 1,
+                "addressdetails": 1,
+                "countrycodes": "jp",
+                "limit": 1,
+            },
+            headers={"User-Agent": "map-filter-app/1.0"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        items = response.json()
+    except requests.RequestException:
+        BOUNDARY_CACHE[query] = None
+        return None
+
+    geojson = None
+    if items:
+        candidate = items[0].get("geojson")
+        if isinstance(candidate, dict) and candidate.get("type") in {
+            "Polygon",
+            "MultiPolygon",
+        }:
+            geojson = candidate
+
+    BOUNDARY_CACHE[query] = geojson
+    return geojson
+
+
+@app.get("/api/geo-boundary")
+def api_geo_boundary():
+    pref = (request.args.get("pref") or "").strip()
+    city = (request.args.get("city") or "").strip()
+    if not pref:
+        return json_no_store({"error": "pref is required"}, 400)
+
+    query = f"{city}, {pref}, Japan" if city else f"{pref}, Japan"
+    geojson = _fetch_boundary_geojson(query)
+    if not geojson:
+        return json_no_store({"geojson": None, "query": query})
+    return json_no_store({"geojson": geojson, "query": query})
 
 
 @app.post("/api/favorites/add")

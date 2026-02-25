@@ -128,6 +128,8 @@ function populateCities(regionKey, prefKey){
 
 let geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
 let geoCircle = null;
+let geoBoundaryLayer = null;
+const geoBoundaryCache = new Map();
 
 function setGeoScopeByUI(){
   const regionKey = regionSelect?.value || null;
@@ -147,12 +149,52 @@ function setGeoScopeByUI(){
   } else {
     geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
   }
-  drawGeoCircle(); applyFilters();
+  drawGeoScope().finally(()=> applyFilters());
 }
 
-function drawGeoCircle(){
+async function fetchGeoBoundary(prefKey, cityKey = null){
+  if (!prefKey) return null;
+  const cacheKey = `${prefKey}::${cityKey || ''}`;
+  if (geoBoundaryCache.has(cacheKey)) return geoBoundaryCache.get(cacheKey);
+
+  const usp = new URLSearchParams({ pref: prefKey });
+  if (cityKey) usp.set('city', cityKey);
+  try {
+    const res = await fetch(`/api/geo-boundary?${usp.toString()}`);
+    if (!res.ok) throw new Error('地域境界の取得に失敗しました');
+    const payload = await res.json();
+    const geojson = payload?.geojson || null;
+    geoBoundaryCache.set(cacheKey, geojson);
+    return geojson;
+  } catch (err) {
+    console.warn('地域境界の取得エラー', err);
+    geoBoundaryCache.set(cacheKey, null);
+    return null;
+  }
+}
+
+async function drawGeoScope(){
   if (!map) return;
   if (geoCircle){ geoCircle.remove(); geoCircle=null; }
+  if (geoBoundaryLayer){ geoBoundaryLayer.remove(); geoBoundaryLayer=null; }
+
+  let boundaryGeoJson = null;
+  if (geoScope.prefKey){
+    boundaryGeoJson = await fetchGeoBoundary(geoScope.prefKey, geoScope.cityKey || null);
+    if (!boundaryGeoJson && geoScope.cityKey) boundaryGeoJson = await fetchGeoBoundary(geoScope.prefKey, null);
+  }
+
+  if (boundaryGeoJson){
+    geoBoundaryLayer = L.geoJSON(boundaryGeoJson, {
+      style: { color:'#3b82f6', weight:2, dashArray:'6 6', fillColor:'#3b82f6', fillOpacity:.06 },
+    }).addTo(map);
+    const bounds = geoBoundaryLayer.getBounds();
+    if (bounds.isValid()){
+      map.fitBounds(bounds, { padding: [24,24] });
+      return;
+    }
+  }
+
   if (geoScope.bbox && Array.isArray(geoScope.bbox) && geoScope.bbox.length===4){
     const [minLon,minLat,maxLon,maxLat] = geoScope.bbox;
     const bounds = L.latLngBounds([ [minLat,minLon], [maxLat,maxLon] ]);
@@ -171,6 +213,7 @@ document.getElementById('clearGeo')?.addEventListener('click', ()=>{
   if (citySelect){ citySelect.innerHTML='<option value="">市区町村（まず都道府県を選択）</option>'; citySelect.disabled=true; }
   geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
   if (geoCircle){ geoCircle.remove(); geoCircle=null; }
+  if (geoBoundaryLayer){ geoBoundaryLayer.remove(); geoBoundaryLayer=null; }
   applyFilters();
 });
 regionSelect?.addEventListener('change', ()=>{ populatePrefs(regionSelect.value); setGeoScopeByUI(); });
@@ -883,6 +926,7 @@ document.getElementById('resetBtn')?.addEventListener('click', ()=>{
   if (selectionLayer){ selectionLayer.remove(); selectionLayer=null; }
   if (centerDot){ centerDot.remove(); centerDot=null; }
   if (geoCircle){ geoCircle.remove(); geoCircle=null; }
+  if (geoBoundaryLayer){ geoBoundaryLayer.remove(); geoBoundaryLayer=null; }
   geoScope = { level:null, key:null, prefKey:null, cityKey:null, center:null, radius:null, zoom:null, bbox:null };
   if (regionSelect) regionSelect.value='';
   if (prefSelect){ prefSelect.innerHTML='<option value="">都道府県（まず地方を選択）</option>'; prefSelect.disabled=true; }
