@@ -8,6 +8,34 @@ let favs = new Set();
 const commentsCache = new Map();
 let searchHistory = [];
 
+// Firebase認証状態のUI更新関数
+const memberGreetingEl = document.querySelector('[data-user-greeting]');
+function showMember(on) {
+  document.querySelectorAll('[data-member]').forEach((el) => {
+    el.hidden = !on;
+  });
+  document.querySelectorAll('[data-guest]').forEach((el) => {
+    el.hidden = on;
+  });
+}
+
+function updateGreeting(user) {
+  if (!memberGreetingEl) return;
+  if (!user) {
+    memberGreetingEl.textContent = '';
+    return;
+  }
+  const name = (user.displayName || '').trim() || (user.email ? user.email.split('@')[0] : '会員');
+  memberGreetingEl.textContent = `${name}さんのマイページ`;
+}
+
+// 初期認証状態のチェックとUI更新
+if (window.firebaseAuthState) {
+  const { user } = window.firebaseAuthState;
+  showMember(!!user);
+  updateGreeting(user);
+}
+
 // Flask の /api/spots からJSONを取得
 async function fetchSpots(params = {}) {
   const usp = new URLSearchParams(params);
@@ -824,6 +852,9 @@ window.addEventListener('firebase-auth-state', async (event)=>{
   memberAuth.user = detail.user || null;
   memberAuth.idToken = detail.idToken || null;
   memberAuth.isLoggedIn = Boolean(memberAuth.user && memberAuth.idToken);
+  // UI更新
+  showMember(memberAuth.isLoggedIn);
+  updateGreeting(memberAuth.user);
   commentsCache.clear();
   if (memberAuth.isLoggedIn){
     await loadFavorites();
