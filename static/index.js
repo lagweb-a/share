@@ -224,8 +224,8 @@ citySelect?.addEventListener('change',  ()=> setGeoScopeByUI());
 const fmt = n => new Intl.NumberFormat('ja-JP').format(n);
 const fmt1= n => new Intl.NumberFormat('ja-JP',{maximumFractionDigits:1}).format(n);
 const yen = v => v==null ? '—' : `¥${fmt(v)}`;
-const norm= s => (s||'').toString().trim().toLowerCase();
-const tokens=q => norm(q).split(/\s+/).filter(Boolean);
+const norm= s => (s||'').toString().replace(/[|,、]/g,' ').replace(/\s+/g,' ').trim().toLowerCase();
+const tokens=q => norm(q).split(' ').filter(Boolean);
 const gmapLink = (lat, lon)=> lat!=null && lon!=null ? `https://www.google.com/maps/search/?api=1&query=${lat},${lon}` : '#';
 const gmapEmbed = (lat, lon, z=16)=> lat!=null && lon!=null ? `https://www.google.com/maps?q=${lat},${lon}&z=${z}&hl=ja&output=embed` : '';
 const R=6371; const haversineKm=(a,b)=>{const r=x=>x*Math.PI/180;const dLat=r(b[0]-a[0]),dLon=r(b[1]-a[1]),la1=r(a[0]),la2=r(b[0]);const h=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(h));};
@@ -529,7 +529,15 @@ function filterPlaces(query, opts){
   if (selectedTags.size){ arr = arr.filter(p => (p.tags||[]).some(t => selectedTags.has(t))); }
   if (ts.length){
     arr=arr.filter(p=>{
-      const hay=(p.name+'\u0000'+(p.tags||[]).join('\u0000')).toLowerCase();
+      const hay=[
+        p.name,
+        p.desc,
+        p.address,
+        p.pref,
+        p.city,
+        p.region,
+        ...(p.tags||[]),
+      ].join('\u0000').toLowerCase();
       return ts.every(t=>hay.includes(t));
     });
   }

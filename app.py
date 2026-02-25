@@ -225,6 +225,17 @@ REGION_PRESET = {
 PREFECTURE_NAMES = list(PREF_REGION_INFO.keys())
 BOUNDARY_CACHE: Dict[str, Optional[Dict]] = {}
 
+TAG_KEYWORDS = {
+    "レストラン": ["レストラン", "食堂", "ダイニング", "料理店"],
+    "居酒屋": ["居酒屋", "酒場", "立ち飲み", "バル"],
+    "カフェ": ["カフェ", "喫茶", "coffee"],
+    "ラーメン": ["ラーメン", "らーめん", "中華そば"],
+    "みなとみらい": ["みなとみらい", "桜木町", "赤レンガ", "ランドマークタワー"],
+}
+
+BUDGET_RANGE_RE = re.compile(r"(\d{3,5})\s*(?:円)?\s*[~〜～\-−ー]\s*(\d{3,5})\s*円?")
+
+
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """2地点間の距離（km）を計算"""
     rlat1 = math.radians(lat1)
@@ -279,6 +290,68 @@ def compute_center_radius(
     return center, radius_m, bbox
 
 
+def parse_tag_text(raw_tags: str) -> List[str]:
+    if not isinstance(raw_tags, str):
+        return []
+    values = re.split(r"[|,、\s]+", raw_tags)
+    cleaned = [v.strip() for v in values if v and v.strip()]
+    return list(dict.fromkeys(cleaned))
+
+
+def extract_budget_tags(text: str) -> List[str]:
+    if not isinstance(text, str) or not text:
+        return []
+    tags: List[str] = []
+    for low, high in BUDGET_RANGE_RE.findall(text):
+        tag = f"{int(low)}円~{int(high)}円"
+        tags.append(tag)
+    return list(dict.fromkeys(tags))
+
+
+def infer_spot_tags(row: Dict) -> List[str]:
+    name = str(row.get("name") or "")
+    desc = str(row.get("description") or "")
+    address = str(row.get("address") or "")
+    price = str(row.get("price") or "")
+    pref = str(row.get("prefecture") or "")
+    city = str(row.get("city") or "")
+
+    text_blob = "\n".join([name, desc, address, price]).lower()
+    tags = parse_tag_text(str(row.get("tags") or ""))
+
+    for tag_name, keywords in TAG_KEYWORDS.items():
+        if any(keyword.lower() in text_blob for keyword in keywords):
+            tags.append(tag_name)
+
+    tags.extend(extract_budget_tags(price))
+
+    if pref:
+        tags.append(pref)
+    if city:
+        tags.append(city)
+
+    return list(dict.fromkeys([t for t in tags if t]))
+
+
+def tokenize_query(query: str) -> List[str]:
+    cleaned = re.sub(r"[|,、]+", " ", (query or "").strip().lower())
+    return [t for t in cleaned.split() if t]
+
+
+def spot_searchable_text(spot: Dict) -> str:
+    fields = [
+        spot.get("name", ""),
+        spot.get("description", ""),
+        spot.get("address", ""),
+        spot.get("price", ""),
+        spot.get("prefecture", ""),
+        spot.get("city", ""),
+        spot.get("region", ""),
+        spot.get("tags", ""),
+    ]
+    return "\n".join(str(v) for v in fields if v).lower()
+
+
 def load_spots():
     # CSVをDataFrameとして読み込み
     df = pd.read_csv(DATA_PATH, encoding="utf-8")
@@ -302,6 +375,9 @@ def load_spots():
 
     # NaN を空文字に置き換えて dict のリストに変換
     spots = df.fillna("").to_dict(orient="records")
+    for spot in spots:
+        merged_tags = infer_spot_tags(spot)
+        spot["tags"] = "|".join(merged_tags)
     return spots
 
 
@@ -388,18 +464,17 @@ def signup_page():
 
 @app.route("/api/spots")
 def api_spots():
-    q = (request.args.get("q") or "").strip().lower()
+    q = (request.args.get("q") or "").strip()
+    query_tokens = tokenize_query(q)
 
     data = load_spots()
 
     # フィルタ処理（name/desc/tagsに含まれるか）
     def filtering(s):
-        return (
-            not q
-            or q in str(s["name"]).lower()
-            or q in str(s["desc"]).lower()
-            or q in str(s["tags"]).lower()
-        )
+       if not query_tokens:
+            return True
+       haystack = spot_searchable_text(s)
+       return all(token in haystack for token in query_tokens)
 
     return jsonify([s for s in data if filtering(s)])
 
