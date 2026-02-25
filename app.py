@@ -837,6 +837,14 @@ class SearchHistory(db.Model):
 
 
 with app.app_context():
+    # データベースマイグレーション: 既存テーブルにカラムを追加
+    from sqlalchemy import text
+    try:
+        db.session.execute(text("ALTER TABLE search_history ADD COLUMN query_text VARCHAR(255) NOT NULL DEFAULT ''"))
+        db.session.commit()
+        print("Added query_text column to search_history")
+    except Exception as e:
+        print(f"Column already exists or error: {e}")
     db.create_all()
 
 
