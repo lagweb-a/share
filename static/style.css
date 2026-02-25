@@ -163,14 +163,12 @@ input[type="range"]{ touch-action:none }
 .pill{ padding:6px 10px; border:1px solid var(--accent-3); border-radius:999px; font-size:13px; background:#fff; cursor:pointer }
 .pill.active{ border-color:var(--accent); box-shadow:0 0 0 3px #3b82f622 }
 
-  /* Tag filter bar */
-.tagbar{ display:flex; flex-wrap:wrap; gap:8px; justify-content:center; padding:10px 14px 16px; }
-.tagchip{
-  padding:8px 12px; border:1px solid var(--accent-3); background:#f8fbff; color:#1f2a44;
-  border-radius:999px; font-size:13px; cursor:pointer; transition:box-shadow .15s, border-color .15s, background .15s;
+  /* Tag filter dropdown */
+.tag-filter-wrap{ display:flex; justify-content:center; padding:10px 14px 0; }
+#tagSelect{
+  min-width:min(100%, 360px); height:42px; border-radius:12px; border:1px solid var(--accent-3);
+  background:#fff; color:#1f2a44; padding:0 12px; font-size:14px;
 }
-.tagchip:hover{ box-shadow:0 2px 10px #0000000b; }
-.tagchip.active{ border-color:var(--accent); background:linear-gradient(180deg, #eef2ff, #fff); box-shadow:0 0 0 3px #3b82f622; }
 
 
   footer{ width:min(100%,var(--maxw)); margin:0 auto; padding:24px 16px calc(24px + var(--safe-bottom)); color:var(--muted); font-size:13px }

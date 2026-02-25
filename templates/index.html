@@ -110,9 +110,13 @@
         <button id="clearGeo" class="btn ghost" type="button">× 地域クリア</button>
       </div>
 
-      <!-- タグフィルタ（自動生成） -->
-      <div class="tagbar" id="tagBar" aria-label="タグで絞り込み"></div>
-      <div style="text-align:center; margin:-4px 0 4px;">
+      <!-- タグフィルタ（プルダウン） -->
+      <div class="tag-filter-wrap">
+        <select id="tagSelect" aria-label="タグ">
+          <option value="">タグ（未選択）</option>
+        </select>
+      </div>
+      <div style="text-align:center; margin:4px 0 4px;">
         <button id="clearTags" class="btn ghost" type="button">タグ解除</button>
       </div>
     </div>

@@ -485,33 +485,42 @@ function syncMarkers(keepIds){
   for (const id of current){ if (!keepIds.has(id)) { const mk=markerPool.get(id); if (mk) cluster.removeLayer(mk); } }
 }
 
-/* ===== タグバー ===== */
+/* ===== タグ（プルダウン） ===== */
+const EXTRA_TAG_OPTIONS = ['レストラン', 'カラオケ'];
+
 function uniqueTagsFromPlaces(){
   const s = new Set();
   PLACES.forEach(p => (p.tags||[]).forEach(t => s.add(t)));
+  EXTRA_TAG_OPTIONS.forEach(t => s.add(t));
   return Array.from(s).sort((a,b)=> a.localeCompare(b,'ja'));
 }
-function buildTagBar(){
-  const box = document.getElementById('tagBar');
-  if (!box) return;
-  box.innerHTML = '';
+function buildTagDropdown(){
+  const sel = document.getElementById('tagSelect');
+  if (!sel) return;
+  const currentValue = sel.value;
+  sel.innerHTML = '<option value="">タグ（未選択）</option>';
   uniqueTagsFromPlaces().forEach(tag=>{
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'tagchip';
-    btn.textContent = `# ${tag}`;
-    btn.dataset.tag = tag;
-    btn.addEventListener('click', ()=>{
-      if (selectedTags.has(tag)) selectedTags.delete(tag); else selectedTags.add(tag);
-      btn.classList.toggle('active', selectedTags.has(tag));
-      applyFilters();
-    });
-    box.appendChild(btn);
+    const opt = document.createElement('option');
+    opt.value = tag;
+    opt.textContent = tag;
+    sel.appendChild(opt);
   });
+  if (currentValue && uniqueTagsFromPlaces().includes(currentValue)) {
+    sel.value = currentValue;
+    selectedTags.clear();
+    selectedTags.add(currentValue);
+  }
 }
 document.getElementById('clearTags')?.addEventListener('click', ()=>{
   selectedTags.clear();
-  document.querySelectorAll('#tagBar .tagchip').forEach(b=> b.classList.remove('active'));
+  const sel = document.getElementById('tagSelect');
+  if (sel) sel.value = '';
+  applyFilters();
+});
+document.getElementById('tagSelect')?.addEventListener('change', (e)=>{
+  const value = e.target.value;
+  selectedTags.clear();
+  if (value) selectedTags.add(value);
   applyFilters();
 });
 const selectedTags = new Set();
@@ -901,7 +910,7 @@ window.addEventListener('firebase-auth-state', async (event)=>{
     GEO_READY = false;
   }
   initMap();
-  buildTagBar();
+  buildTagDropdown();
   render(PLACES);
   updateFavCounter();
   populateRegions();
@@ -972,6 +981,8 @@ document.getElementById('resetBtn')?.addEventListener('click', ()=>{
   if (citySelect){ citySelect.innerHTML='<option value="">市区町村（まず都道府県を選択）</option>'; citySelect.disabled=true; }
   selectedId=null; currentLoc=null; const gs=document.getElementById('geoStatus'); if(gs) gs.textContent='';
   map.setView(defaultCenter, defaultZoom);
-  selectedTags.clear(); document.querySelectorAll('#tagBar .tagchip').forEach(b=> b.classList.remove('active'));
+  selectedTags.clear();
+  const tagSelectEl = document.getElementById('tagSelect');
+  if (tagSelectEl) tagSelectEl.value = '';
   render(PLACES); updateFavCounter();
 });
