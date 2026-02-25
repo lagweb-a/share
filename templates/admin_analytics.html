@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>管理者 - Analytics</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div style="width:min(100%,1100px);margin:24px auto;padding:16px">
+    <h1>Analytics（最新20件）</h1>
+    <p><a href="/">サイトに戻る</a></p>
+    {% if not rows %}
+      <p>まだ分析結果がありません。`analytics/analyze.py` を実行してから再読込してください。</p>
+    {% else %}
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="text-align:left;border-bottom:1px solid #ddd">
+            <th>日時 (UTC)</th>
+            <th>レビュー数</th>
+            <th>レビュー平均</th>
+            <th>会員口コミ数</th>
+            <th>会員平均</th>
+            <th>上位ターゲット (top 5)</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for r in rows %}
+          <tr style="border-bottom:1px solid #f0f0f0">
+            <td style="padding:8px">{{ r.created_at }}</td>
+            <td>{{ r.total_reviews or '—' }}</td>
+            <td>{{ '%.2f'|format(r.avg_review_rating) if r.avg_review_rating is not none else '—' }}</td>
+            <td>{{ r.total_member_comments or '—' }}</td>
+            <td>{{ '%.2f'|format(r.avg_member_rating) if r.avg_member_rating is not none else '—' }}</td>
+            <td style="padding:8px;white-space:pre-wrap;font-family:monospace">{{ (r.top_targets_json or '')[:200] }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+</body>
+</html>
