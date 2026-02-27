@@ -11,8 +11,10 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 import requests
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, make_response, abort
 from flask_cors import CORS
+import csv
+import io
 
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
@@ -156,7 +158,7 @@ def public_api():
 def member_only():
     user = current_user()
     payload = {
-        "message": "member ok",
+        "message": "operation ok",
         "uid": user.get("uid"),
         "email": user.get("email"),
     }
@@ -667,6 +669,55 @@ def post_member_comment():
     return json_no_store(payload, 201)
 
 
+# ------ イベント記録エンドポイント ------
+ADMIN_UIDS = set(os.environ.get("ADMIN_UIDS", "").split(","))
+
+def is_admin(user: dict) -> bool:
+    return bool(user and user.get("uid") in ADMIN_UIDS)
+
+
+@app.post("/api/event")
+@login_required
+def post_event():
+    """ユーザー行動を記録。フロントエンドから任意に送る。"""
+    uid = _uid_from_request()
+    if not uid:
+        return json_no_store({"error": "invalid-token"}, 401)
+    data = request.get_json(force=True) or {}
+    ev = UserEvent(
+        uid=uid,
+        event_type=str(data.get("event_type") or "").strip(),
+        target_id=str(data.get("target_id") or "").strip() or None,
+    )
+    db.session.add(ev)
+    db.session.commit()
+    return json_no_store({"ok": True}, 201)
+
+
+@app.get("/admin/export-events")
+@login_required
+def export_events():
+    user = current_user()
+    if not is_admin(user):
+        abort(403)
+    events = UserEvent.query.order_by(UserEvent.created_at).all()
+    si = io.StringIO()
+    writer = csv.writer(si)
+    writer.writerow(["id", "uid", "event_type", "target_id", "created_at"])
+    for e in events:
+        writer.writerow([
+            e.id,
+            e.uid,
+            e.event_type,
+            e.target_id or "",
+            e.created_at.isoformat(),
+        ])
+    output = make_response(si.getvalue())
+    output.headers["Content-Disposition"] = "attachment; filename=events.csv"
+    output.headers["Content-Type"] = "text/csv"
+    return output
+
+
 @app.get("/api/comments")
 @login_required
 def get_member_comments():
@@ -844,7 +895,18 @@ class SearchHistory(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     uid = db.Column(db.String(128), nullable=False, index=True)
-    query_text = db.Column(db.String(255), nullable=False)  # ← query をやめる
+    query_text = db.Column(db.String(255),nullable=False)  # ← query をやめる
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+# -- イベントログ用モデル（利用回数／クリック／お気に入り／レビューなど）
+class UserEvent(db.Model):
+    __tablename__ = "user_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    uid = db.Column(db.String(128), nullable=False, index=True)
+    event_type = db.Column(db.String(64), nullable=False)
+    target_id = db.Column(db.String(255), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
