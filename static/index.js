@@ -267,7 +267,18 @@ const escapeHtml = (s='') => s.replace(/[&<>"']/g, (ch)=>({
   '"':'&quot;',
   "'":'&#39;',
 }[ch]));
-
+// simple wrapper for posting a user event to the server
+async function postEvent(type, targetId){
+  if (!memberAuth.isLoggedIn) return;
+  try {
+    await authorizedFetch('/api/event', {
+      method: 'POST',
+      body: JSON.stringify({event_type: type, target_id: targetId}),
+    });
+  } catch (e) {
+    console.error('イベント記録失敗', e);
+  }
+}
 /* ===== お気に入り／コメント（会員専用） ===== */
 const isFav = (id) => memberAuth.isLoggedIn && favs.has(id);
 
@@ -300,12 +311,14 @@ async function toggleFav(id) {
         body: JSON.stringify({ item_id: id }),
       });
       favs.delete(id);
+      postEvent('fav-remove', id);
     } else {
       await authorizedFetch('/api/favorites/add', {
         method: 'POST',
         body: JSON.stringify({ item_id: id }),
       });
       favs.add(id);
+      postEvent('fav-add', id);
     }
     updateFavCounter();
   } catch (err) {
@@ -627,7 +640,10 @@ function render(list){
       const mk=markerPool.get(p.id); if (mk){ mk.openPopup(); }
       selectedId=p.id; highlightSelected();
     }));
-    card.querySelectorAll('[data-action="detail"]').forEach(b=> b.addEventListener('click', ()=> openPanelFor(p)));
+    card.querySelectorAll('[data-action="detail"]').forEach(b=> b.addEventListener('click', ()=>{
+      postEvent('detail-click', p.id);
+      openPanelFor(p);
+    }));
     card.querySelector('[data-action="fav"]').addEventListener('click', async ()=>{
       await toggleFav(p.id);
       updateFavInPanel(p.id);
@@ -923,6 +939,7 @@ document.getElementById('searchForm')?.addEventListener('submit', (e)=>{
   applyFilters();
   const qVal = document.getElementById('q')?.value?.trim();
   recordSearchQuery(qVal);
+  if (qVal) postEvent('search', qVal);
 });
 document.getElementById('q')?.addEventListener('input', ()=> applyFilters());
 ['onlyFavs','onlyDiscount','boundsOnly'].forEach(id=>{
