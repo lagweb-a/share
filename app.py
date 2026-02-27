@@ -399,7 +399,7 @@ def api_spots():
         return (
             not q
             or q in str(s["name"]).lower()
-            or q in str(s["desc"]).lower()
+            or q in str(s["description"]).lower()
             or q in str(s["tags"]).lower()
         )
 
