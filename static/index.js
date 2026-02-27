@@ -606,8 +606,13 @@ function filterPlaces(query, opts){
 
 /* ===== リスト＆ピン同期（カード版） ===== */
 function cardImage(p){
-  const src = p.thumb || 'https://source.unsplash.com/800x600/?travel,city';
-  return `<img src="${src}" alt="${p.name}" onerror="this.style.display='none'">`;
+  const src =
+    p.image_url && p.image_url.trim()
+      ? p.image_url.trim()
+      : 'https://source.unsplash.com/800x600/?travel,city';
+
+  return `<img class="card-thumb" src="${src}" alt="${p.name}" loading="lazy"
+          onerror="this.style.display='none'">`;
 }
 function render(list){
   const listEl=document.getElementById('list'); listEl.innerHTML='';
