@@ -66,34 +66,38 @@ async function authorizedFetch(url, options = {}) {
 
 // API返却: id,name,url,address,lat,lon,tags,description,image_url,price
 function normalizeSpot(raw, idx) {
-  const id  = raw.id ?? String(idx);
+  const id  = String(raw.id ?? idx);
+
   const lat = (raw.lat !== '' && raw.lat != null && !isNaN(Number(raw.lat))) ? Number(raw.lat) : null;
   const lon = (raw.lon !== '' && raw.lon != null && !isNaN(Number(raw.lon))) ? Number(raw.lon) : null;
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lon);
 
-  // "横浜|赤レンガ|イベント" → ["横浜","赤レンガ","イベント"]
   const tags = typeof raw.tags === 'string'
     ? raw.tags.split('|').map(s=>s.trim()).filter(Boolean)
     : (Array.isArray(raw.tags) ? raw.tags : []);
 
-  // 価格は必要に応じて拡張可能（現状は学割UIなしなので固定で unavailable）
+  // ★ここを追加（CSV→APIのキーは student_text なのでそれを読む）
+  const studentText = (raw.student_text ?? '').toString().trim();
+
   return {
     id,
-    name: raw.name || '',     // ← 
+    name: raw.name || '',
     lat,
     lon,
     hasCoords,
-    desc: raw.description || '',
+    desc: raw.description || '',     // APIのキーに合わせる
     tags,
     address: raw.address || '',
     url: raw.url || '',
-    thumb: raw.image_url,
+    thumb: raw.image_url || '',
     region: raw.region || '',
     pref: raw.prefecture || raw.pref || '',
     city: raw.city || '',
-    
-    // 学割フラグ：データ列が無いのでUI上はオフにしておく
-    student: { available:false }
+    student: {
+      available: !!studentText,
+      note: studentText,
+      // optional: 学割ページURLを別に持たせたいなら raw.student_url などに拡張
+    }
   };
 }
 
@@ -713,7 +717,7 @@ async function openPanelFor(p){
           </div>
         <p class="muted-on-dark" style="margin:.4em 0 0">${p.desc||''}</p>
         <p>${(p.tags||[]).map(t=>`<span class="tag" style="background:#0b1220;color:#e5e7eb;border:1px solid #374151">${t}</span>`).join(' ')}</p>
-        ${p.student?.available ? `<p class="muted-on-dark"><strong>学割:</strong> 学生 ${yen(p.student.price?.student)}${p.student.price?.adult!=null?`／一般 ${yen(p.student.price.adult)}`:''}<br><small>${p.student.condition||''}</small></p>` : '<p class="muted-on-dark"><small>学割情報なし</small></p>'}
+        ${p.student?.available ? `<p class="muted-on-dark"><strong>学割:</strong> ${escapeHtml(p.student.note)}</p>` : '<p class="muted-on-dark"><small>学割情報なし</small></p>'}
       </div>
 
       <div>
