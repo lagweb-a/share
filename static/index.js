@@ -64,8 +64,10 @@ function normalizeSpot(raw, idx) {
     pref: raw.prefecture || raw.pref || '',
     city: raw.city || '',
     
-    // 学割フラグ：データ列が無いのでUI上はオフにしておく
-    student: { available:false }
+     student: {
+    available: !!studentText,
+    note: studentText
+  }
   };
 }
 
@@ -625,7 +627,7 @@ async function openPanelFor(p){
           </div>
         <p class="muted-on-dark" style="margin:.4em 0 0">${p.desc||''}</p>
         <p>${(p.tags||[]).map(t=>`<span class="tag" style="background:#0b1220;color:#e5e7eb;border:1px solid #374151">${t}</span>`).join(' ')}</p>
-        ${p.student?.available ? `<p class="muted-on-dark"><strong>学割:</strong> 学生 ${yen(p.student.price?.student)}${p.student.price?.adult!=null?`／一般 ${yen(p.student.price.adult)}`:''}<br><small>${p.student.condition||''}</small></p>` : '<p class="muted-on-dark"><small>学割情報なし</small></p>'}
+        ${p.student?.available ? `<p class="muted-on-dark"><strong>学割:</strong> ${escapeHtml(p.student.note)}</p>` : '<p class="muted-on-dark"><small>学割情報なし</small></p>'}
       </div>
 
       <div>

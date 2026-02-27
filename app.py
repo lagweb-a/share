@@ -391,7 +391,10 @@ def api_spots():
 
     data = load_spots()
 
-    # フィルタ処理（name/desc/tagsに含まれるか）
+    for s in data:
+        s["student_text"] = (s.get("student_text") or "").strip()
+
+    # フィルタ処理 (name/desc/tagsに含まれるか)
     def filtering(s):
         return (
             not q
