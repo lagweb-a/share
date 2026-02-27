@@ -41,16 +41,18 @@ def init_firebase_admin():
     """
     cred_obj = None
 
-    # 1) env var JSON
+    # 1) env var JSON（Render本番）
     sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
     if sa_json:
         try:
             cred_obj = credentials.Certificate(json.loads(sa_json))
             print("[firebase] using credentials from env var")
         except Exception as e:
-            print("[firebase] env var set but invalid JSON:", repr(e))
+            raise RuntimeError(
+                f"[firebase] FIREBASE_SERVICE_ACCOUNT_JSON is set but invalid: {e}"
+            )
 
-    # 2) local file
+    # 2) local file（ローカル開発用）
     if cred_obj is None:
         key_path = pathlib.Path(__file__).with_name("serviceAccountKey.json")
         if not key_path.exists():
@@ -61,11 +63,14 @@ def init_firebase_admin():
         cred_obj = credentials.Certificate(str(key_path))
         print(f"[firebase] using credentials file: {key_path}")
 
-    # initialize app once
-    try:
-        firebase_admin.get_app()
-    except ValueError:
+    # Firebase 初期化（多重初期化防止）
+    if not firebase_admin._apps:
         firebase_admin.initialize_app(cred_obj)
+        # initialize app once
+        try:
+            firebase_admin.get_app()
+        except ValueError:
+            firebase_admin.initialize_app(cred_obj)
 
 
 # ← アプリ起動時に一度だけ初期化
@@ -854,14 +859,21 @@ with app.app_context():
 
 # Google Sheets認証
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-CREDS_FILE = 'sheet-api-470504-a2538cff344f.json'  # 認証ファイル名
-SPREADSHEET_ID = '1ADyw0jV2GETPE6Lr5eam1LayuScfz2AA-OopGoWQ6oo'  # ←必ず書き換え
+SPREADSHEET_ID = '1ADyw0jV2GETPE6Lr5eam1LayuScfz2AA-OopGoWQ6oo'
 
-creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
+sa_json = os.environ.get("GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON")
+
+if sa_json and sa_json.strip():
+    creds = Credentials.from_service_account_info(json.loads(sa_json), scopes=SCOPES)
+else:
+    # ローカル開発用（ファイル）
+    key_path = pathlib.Path(__file__).with_name("sheet-api-470504-a2538cff344f.json")
+    if not key_path.exists():
+        raise RuntimeError("GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON is not set and sheet-api-*.json not found next to app.py")
+    creds = Credentials.from_service_account_file(str(key_path), scopes=SCOPES)
+
 gc = gspread.authorize(creds)
-sh = gc.open_by_key(SPREADSHEET_ID)
-worksheet = sh.sheet1
-
+worksheet = gc.open_by_key(SPREADSHEET_ID).sheet1
 
 if __name__ == "__main__":
     # 開発用：自動リロード
