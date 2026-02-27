@@ -157,8 +157,12 @@ def public_api():
 @login_required
 def member_only():
     user = current_user()
+    msg = "member ok"
+    # 管理者UIDなら operation ok に差し替え
+    if is_admin(user):
+        msg = "operation ok"
     payload = {
-        "message": "operation ok",
+        "message": msg,
         "uid": user.get("uid"),
         "email": user.get("email"),
     }
