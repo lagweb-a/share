@@ -13,6 +13,7 @@ Flask-Cors==5.0.0
 Flask-SQLAlchemy==3.1.1
 geographiclib==2.1
 geopy==2.4.1
+gunicorn
 google-api-core==2.28.1
 google-api-python-client==2.187.0
 google-auth==2.41.1
